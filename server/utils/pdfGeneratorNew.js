@@ -1,10 +1,22 @@
 import puppeteer from 'puppeteer';
 import { format } from 'date-fns';
 
+// V-05: escapes all user-controlled strings before HTML interpolation
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function generateAssessmentPDF(assessment, assessmentData, entity) {
+  // V-06: removed --no-sandbox; run as non-root user in production
   const browser = await puppeteer.launch({
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ['--disable-dev-shm-usage', '--disable-gpu']
   });
 
   try {
@@ -342,11 +354,11 @@ function generateHTMLContent(assessment, assessmentData, entity) {
     <div class="info-grid">
       <div class="info-item">
         <span class="info-label">اسم الجهة:</span>
-        <span class="info-value">${entity.name_ar || entity.name}</span>
+        <span class="info-value">${escapeHtml(entity.name_ar || entity.name)}</span>
       </div>
       <div class="info-item">
         <span class="info-label">نوع النشاط:</span>
-        <span class="info-value">${entity.activity_type === 'government' ? 'حكومي' : entity.activity_type}</span>
+        <span class="info-value">${entity.activity_type === 'government' ? 'حكومي' : escapeHtml(entity.activity_type)}</span>
       </div>
       <div class="info-item">
         <span class="info-label">سنة التقييم:</span>

@@ -42,6 +42,10 @@ export async function logAudit(client, tableName, recordId, operationType, oldVa
  * @param {Object} options - خيارات إضافية
  * @returns {Promise<Array>} قائمة بسجلات AuditLog
  */
+// V-04: column allowlists to prevent ORDER BY SQL injection
+const AUDIT_ALLOWED_COLS = ['performed_at', 'table_name', 'record_id', 'operation_type'];
+const AUDIT_ALLOWED_DIRS = ['ASC', 'DESC'];
+
 export async function getAuditLog(tableName, recordId = null, options = {}) {
   const {
     operationType = null,
@@ -51,35 +55,32 @@ export async function getAuditLog(tableName, recordId = null, options = {}) {
     orderDirection = 'DESC'
   } = options;
 
-  let sql = `
-    SELECT *
-    FROM AuditLog
-    WHERE table_name = $1
-  `;
+  // V-04: validate ORDER BY column and direction against allowlist
+  const safeCol = AUDIT_ALLOWED_COLS.includes(orderBy) ? orderBy : 'performed_at';
+  const safeDir = AUDIT_ALLOWED_DIRS.includes((orderDirection || '').toUpperCase())
+    ? orderDirection.toUpperCase()
+    : 'DESC';
 
+  let sql = `SELECT * FROM AuditLog WHERE table_name = $1`;
   const params = [tableName];
   let paramCount = 1;
 
   if (recordId) {
-    paramCount++;
-    sql += ` AND record_id = $${paramCount}`;
+    sql += ` AND record_id = $${++paramCount}`;
     params.push(recordId);
   }
 
   if (operationType) {
-    paramCount++;
-    sql += ` AND operation_type = $${paramCount}`;
+    sql += ` AND operation_type = $${++paramCount}`;
     params.push(operationType);
   }
 
-  sql += ` ORDER BY ${orderBy} ${orderDirection}`;
-  paramCount++;
-  sql += ` LIMIT $${paramCount}`;
-  params.push(limit);
-  
-  paramCount++;
-  sql += ` OFFSET $${paramCount}`;
-  params.push(offset);
+  sql += ` ORDER BY ${safeCol} ${safeDir}`;
+  sql += ` LIMIT $${++paramCount}`;
+  params.push(Math.min(parseInt(limit, 10) || 100, 1000));
+
+  sql += ` OFFSET $${++paramCount}`;
+  params.push(Math.max(parseInt(offset, 10) || 0, 0));
 
   const result = await pool.query(sql, params);
   return result.rows;
@@ -188,12 +189,14 @@ export async function getAuditStats(tableName, recordId = null) {
  * @param {number} daysOld - عدد الأيام (حذف السجلات الأقدم من هذا العدد)
  * @returns {Promise<number>} عدد السجلات المحذوفة
  */
+// V-04: parameterized INTERVAL to prevent injection
 export async function cleanupOldAuditLogs(daysOld = 365) {
-  const result = await pool.query(`
-    DELETE FROM AuditLog
-    WHERE performed_at < NOW() - INTERVAL '${daysOld} days'
-    RETURNING id
-  `);
+  const safeDays = Math.max(1, Math.floor(Number(daysOld)));
+  if (!Number.isFinite(safeDays)) throw new Error('Invalid daysOld value');
 
+  const result = await pool.query(
+    `DELETE FROM AuditLog WHERE performed_at < NOW() - ($1 * INTERVAL '1 day') RETURNING id`,
+    [safeDays]
+  );
   return result.rowCount;
 }

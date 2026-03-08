@@ -66,7 +66,6 @@ router.get('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { include_snapshot = 'false' } = req.query;
 
-    // Get assessment
     const assessmentResult = await query(
       `SELECT a.*, e.name as entity_name, e.name_ar as entity_name_ar
        FROM assessments a
@@ -80,6 +79,28 @@ router.get('/:id', authenticateToken, async (req, res) => {
     }
 
     const assessment = assessmentResult.rows[0];
+
+    // V-02: ownership check — entity_user can only access own entity's assessments
+    if (req.user.role === 'entity_user') {
+      const allowed = req.user.institutions?.length > 0
+        ? req.user.institutions
+        : (req.user.entity_id != null ? [req.user.entity_id] : []);
+      if (!allowed.includes(assessment.entity_id)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    } else if (req.user.role === 'ministry_admin') {
+      const treeCheck = await query(
+        `WITH RECURSIVE entity_tree AS (
+          SELECT id FROM entities WHERE id = $1
+          UNION ALL
+          SELECT e.id FROM entities e JOIN entity_tree et ON e.parent_entity_id = et.id
+        ) SELECT id FROM entity_tree WHERE id = $2`,
+        [req.user.entity_id, assessment.entity_id]
+      );
+      if (treeCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
 
     // Get all step data (legacy)
     const dataResult = await query(
@@ -434,17 +455,18 @@ router.get('/:id/answers', authenticateToken, async (req, res) => {
   }
 });
 
-// Approve/Reject assessment (admin only)
+// Approve/Reject assessment — V-11: positive role allowlist
 router.post('/:id/review', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, comments } = req.body; // action: 'approve' or 'reject'
+    const { action, comments } = req.body;
 
     if (!['approve', 'reject'].includes(action)) {
       return res.status(400).json({ error: 'Action must be approve or reject' });
     }
 
-    if (req.user.role === 'entity_user') {
+    // V-11: only super_admin and ministry_admin may review
+    if (!['super_admin', 'ministry_admin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Only admins can review assessments' });
     }
 

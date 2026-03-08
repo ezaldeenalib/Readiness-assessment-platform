@@ -119,13 +119,33 @@ router.get('/export/pdf', authenticateToken, authorizeRoles('super_admin', 'mini
   }
 });
 
-// Get entity by ID
+// Helper: check if a user has access to a specific entity
+async function checkEntityReadAccess(user, entityId) {
+  if (user.role === 'super_admin') return true;
+  if (user.role === 'ministry_admin') {
+    const r = await query(
+      `WITH RECURSIVE entity_tree AS (
+        SELECT id FROM entities WHERE id = $1
+        UNION ALL
+        SELECT e.id FROM entities e JOIN entity_tree et ON e.parent_entity_id = et.id
+      ) SELECT id FROM entity_tree WHERE id = $2`,
+      [user.entity_id, entityId]
+    );
+    return r.rows.length > 0;
+  }
+  const allowed = user.institutions?.length > 0
+    ? user.institutions
+    : (user.entity_id != null ? [user.entity_id] : []);
+  return allowed.includes(parseInt(entityId, 10));
+}
+
+// Get entity by ID — V-12: ownership check
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
     const result = await query(
-      `SELECT e.*, 
+      `SELECT e.*,
               pe.name as parent_name, pe.name_ar as parent_name_ar,
               (SELECT COUNT(*) FROM entities WHERE parent_entity_id = e.id) as children_count,
               (SELECT COUNT(*) FROM assessments WHERE entity_id = e.id) as assessment_count
@@ -139,9 +159,13 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Entity not found' });
     }
 
+    // V-12: verify access after fetch
+    const ok = await checkEntityReadAccess(req.user, parseInt(id, 10));
+    if (!ok) return res.status(403).json({ error: 'Access denied' });
+
     res.json({ entity: result.rows[0] });
   } catch (error) {
-    console.error('Get entity error:', error);
+    console.error('Get entity error:', error.message);
     res.status(500).json({ error: 'Failed to fetch entity' });
   }
 });
@@ -213,10 +237,13 @@ router.put('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry_ad
   }
 });
 
-// Get entity's children
+// Get entity's children — V-12: ownership check
 router.get('/:id/children', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
+
+    const ok = await checkEntityReadAccess(req.user, parseInt(id, 10));
+    if (!ok) return res.status(403).json({ error: 'Access denied' });
 
     const result = await query(
       `SELECT e.*,
@@ -230,21 +257,21 @@ router.get('/:id/children', authenticateToken, async (req, res) => {
 
     res.json({ children: result.rows });
   } catch (error) {
-    console.error('Get children error:', error);
+    console.error('Get children error:', error.message);
     res.status(500).json({ error: 'Failed to fetch child entities' });
   }
 });
 
-// Get entity dashboard statistics
+// Get entity dashboard statistics — V-12: ownership check
 router.get('/:id/dashboard', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get entity info
-    const entityResult = await query(
-      'SELECT * FROM entities WHERE id = $1',
-      [id]
-    );
+    // V-12: verify access before returning data
+    const ok = await checkEntityReadAccess(req.user, parseInt(id, 10));
+    if (!ok) return res.status(403).json({ error: 'Access denied' });
+
+    const entityResult = await query('SELECT * FROM entities WHERE id = $1', [id]);
 
     if (entityResult.rows.length === 0) {
       return res.status(404).json({ error: 'Entity not found' });

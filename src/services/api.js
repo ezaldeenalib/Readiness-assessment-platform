@@ -4,12 +4,13 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
+  // V-09: send httpOnly cookies on every request
+  withCredentials: true,
 });
 
-// Add auth token to requests
+// V-09: keep Authorization header as fallback for backward-compat
+// (server accepts both cookie and Bearer token)
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -18,22 +19,13 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle auth errors
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 || error.response?.status === 403) {
-      console.error('❌ Authentication error:', {
-        status: error.response?.status,
-        message: error.response?.data?.error || error.message,
-        path: error.config?.url
-      });
-      
-      // Only redirect if not already on login page
       if (window.location.pathname !== '/login') {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-        alert('انتهت صلاحية الجلسة أو لا تملك الصلاحية. يرجى تسجيل الدخول مرة أخرى.');
         window.location.href = '/login';
       }
     }

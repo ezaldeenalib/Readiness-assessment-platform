@@ -13,6 +13,7 @@ import pool from '../database/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { checkPermission } from '../middleware/checkPermission.js';
 import { logAudit } from '../utils/auditLog.js';
+import { validatePassword } from '../utils/validatePassword.js';
 
 const router = express.Router();
 
@@ -26,9 +27,9 @@ router.post('/', authenticateToken, checkPermission('manage_users'), async (req,
       return res.status(400).json({ error: 'البريد وكلمة المرور والاسم الكامل مطلوبة' });
     }
 
-    if (String(password).length < 6) {
-      return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
-    }
+    // V-13: enforce password strength (min 12 chars + complexity)
+    const pwErr = validatePassword(password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
 
     const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.rows.length > 0) {

@@ -1,16 +1,24 @@
 import puppeteer from 'puppeteer';
 import { format } from 'date-fns';
 
+// V-05: escapes all user-controlled strings before HTML interpolation
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function generateEntitiesPDF(entities) {
+  // V-06: removed --no-sandbox; run as non-root user in production
   const browser = await puppeteer.launch({
     headless: 'new',
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--no-zygote',
-      '--single-process',
     ]
   });
 
@@ -300,19 +308,19 @@ function generateHTMLContent(entities) {
       ${entities.map((entity, index) => `
         <tr>
           <td style="text-align: center; font-weight: 600;">${index + 1}</td>
-          <td><strong>${entity.name_ar || '-'}</strong></td>
-          <td>${entity.name || '-'}</td>
+          <td><strong>${escapeHtml(entity.name_ar || '-')}</strong></td>
+          <td>${escapeHtml(entity.name || '-')}</td>
           <td>
-            <span class="activity-type activity-${entity.activity_type}">
-              ${entity.activity_type === 'government' ? 'حكومي' : 
+            <span class="activity-type activity-${escapeHtml(entity.activity_type)}">
+              ${entity.activity_type === 'government' ? 'حكومي' :
                 entity.activity_type === 'mixed' ? 'مختلط' : 'خاص'}
             </span>
           </td>
-          <td>${entity.contact_email || '-'}</td>
-          <td>${entity.contact_phone || '-'}</td>
+          <td>${escapeHtml(entity.contact_email || '-')}</td>
+          <td>${escapeHtml(entity.contact_phone || '-')}</td>
           <td>
-            ${entity.is_active ? 
-              '<span class="badge badge-success">نشط</span>' : 
+            ${entity.is_active ?
+              '<span class="badge badge-success">نشط</span>' :
               '<span class="badge badge-danger">غير نشط</span>'}
           </td>
         </tr>
@@ -335,8 +343,8 @@ function generateHTMLContent(entities) {
         ${entities.filter(e => e.address).map((entity, index) => `
           <tr>
             <td style="text-align: center; font-weight: 600;">${index + 1}</td>
-            <td><strong>${entity.name_ar || entity.name || '-'}</strong></td>
-            <td>${entity.address}</td>
+            <td><strong>${escapeHtml(entity.name_ar || entity.name || '-')}</strong></td>
+            <td>${escapeHtml(entity.address)}</td>
           </tr>
         `).join('')}
       </tbody>

@@ -26,16 +26,21 @@ pool.on('error', (err) => {
   process.exit(-1);
 });
 
-// Helper function to execute queries
+const isProd = process.env.NODE_ENV === 'production';
+
+// V-16: suppress full SQL text in production logs
 export const query = async (text, params) => {
   const start = Date.now();
   try {
     const res = await pool.query(text, params);
-    const duration = Date.now() - start;
-    console.log('Executed query', { text, duration, rows: res.rowCount });
+    if (!isProd) {
+      const duration = Date.now() - start;
+      console.log('Executed query', { duration, rows: res.rowCount });
+    }
     return res;
   } catch (error) {
-    console.error('Database query error:', error);
+    // V-16: never log query text (may contain sensitive data) in production
+    if (!isProd) console.error('Database query error:', error.message);
     throw error;
   }
 };

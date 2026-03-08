@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';            // V-14
+import rateLimit from 'express-rate-limit'; // V-10
+import cookieParser from 'cookie-parser';   // V-09
+import crypto from 'crypto';
 import dotenv from 'dotenv';
+
 import authRoutes from './routes/auth.js';
 import entitiesRoutes from './routes/entities.js';
 import usersRoutes from './routes/users.js';
@@ -8,57 +13,75 @@ import assessmentsRoutes from './routes/assessments.js';
 import analyticsRoutes from './routes/analytics.js';
 import exportsRoutes from './routes/exports.js';
 import statisticsRoutes from './routes/statistics.js';
-// Template-based Evaluation Engine Routes
 import questionsRoutes from './routes/questions.js';
 import templatesRoutes from './routes/templates.js';
 import templateAssessmentsRoutes from './routes/templateAssessments.js';
-
-// New System Routes
 import questionsNewRoutes from './routes/questions_new.js';
 import answersRoutes from './routes/answers.js';
-
-// Central Category System Routes
 import categoriesRoutes from './routes/categories.js';
-
-// Reference Dictionary (Composite/MultiSelect)
 import referencesRoutes from './routes/references.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const isProd = process.env.NODE_ENV === 'production';
 
-// Middleware - allow multiple dev origins (5173, 5174, etc.)
+// ── V-14: Helmet security headers ────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],
+      fontSrc: ["'self'", 'fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    }
+  },
+  hsts: isProd
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
+}));
+
+// ── V-07: Fixed CORS — reject disallowed origins with an error ────────────────
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
   : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
+
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true); // same-origin or non-browser
+    if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    // allow any localhost:5xxx during dev
-    if (/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return cb(null, true);
-    cb(null, allowedOrigins[0]);
+    if (!isProd && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return cb(null, true);
+    // V-07: reject with error — NOT a truthy allowed value
+    return cb(new Error('CORS: origin not permitted'), false);
   },
   credentials: true
 }));
 
+// ── V-09: cookie-parser for httpOnly JWT cookies ──────────────────────────────
+app.use(cookieParser());
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
+// ── V-10: Rate limiting on auth endpoints ────────────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,  // 15 minutes
+  max: 5,                     // 5 attempts per window per IP
+  message: { error: 'Too many attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
 });
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
 });
 
 // API Routes
@@ -69,20 +92,12 @@ app.use('/api/assessments', assessmentsRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/exports', exportsRoutes);
 app.use('/api/statistics', statisticsRoutes);
-
-// Template-based Evaluation Engine Routes
 app.use('/api/questions', questionsRoutes);
 app.use('/api/templates', templatesRoutes);
 app.use('/api/template-assessments', templateAssessmentsRoutes);
-
-// New System Routes
 app.use('/api/questions-new', questionsNewRoutes);
 app.use('/api/answers', answersRoutes);
-
-// Central Category System Routes
 app.use('/api/categories', categoriesRoutes);
-
-// Reference Dictionary API
 app.use('/api/references', referencesRoutes);
 
 // 404 handler
@@ -90,27 +105,19 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
 
-// Error handling middleware
+// ── V-17: No stack traces in responses ───────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  const errorId = crypto.randomUUID();
+  // Log internally with full details; respond with only a safe message
+  console.error(`[${errorId}]`, err);
   res.status(err.status || 500).json({
-    error: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    error: isProd ? 'Internal server error' : (err.message || 'Internal server error'),
+    errorId,
   });
 });
 
-// Start server
 app.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║  Digital Maturity Assessment System API Server           ║
-║  + Template-based Evaluation Engine 🚀                    ║
-║  Status: Running ✓                                        ║
-║  Port: ${PORT}                                           ║
-║  Environment: ${process.env.NODE_ENV || 'development'}                                  ║
-║  CORS Origin: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}              ║
-╚═══════════════════════════════════════════════════════════╝
-  `);
+  console.log(`Server running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
 });
 
 export default app;

@@ -15,6 +15,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // V-15: source maps disabled in production to avoid exposing source code
+    sourcemap: process.env.NODE_ENV !== 'production',
   }
 })

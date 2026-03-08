@@ -1,21 +1,30 @@
 import puppeteer from 'puppeteer';
 import { format } from 'date-fns';
 
+// V-05: escapes all user-controlled strings before HTML interpolation
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function generateStatisticsReport(stats) {
   let browser;
   
   try {
     console.log('Launching Puppeteer browser...');
     
+    // V-06: removed --no-sandbox; run as non-root user in production
     browser = await puppeteer.launch({
       headless: true,
       args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
-        '--no-zygote',
         '--disable-gpu'
       ]
     });

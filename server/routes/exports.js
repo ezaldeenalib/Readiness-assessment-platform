@@ -26,6 +26,29 @@ router.get('/pdf/:assessmentId', authenticateToken, async (req, res) => {
     }
 
     const assessment = assessmentResult.rows[0];
+
+    // V-02: ownership check for PDF export
+    if (req.user.role === 'entity_user') {
+      const allowed = req.user.institutions?.length > 0
+        ? req.user.institutions
+        : (req.user.entity_id != null ? [req.user.entity_id] : []);
+      if (!allowed.includes(assessment.entity_id)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    } else if (req.user.role === 'ministry_admin') {
+      const treeCheck = await query(
+        `WITH RECURSIVE entity_tree AS (
+          SELECT id FROM entities WHERE id = $1
+          UNION ALL
+          SELECT e.id FROM entities e JOIN entity_tree et ON e.parent_entity_id = et.id
+        ) SELECT id FROM entity_tree WHERE id = $2`,
+        [req.user.entity_id, assessment.entity_id]
+      );
+      if (treeCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
     const entity = {
       name: assessment.name,
       name_ar: assessment.name_ar,
