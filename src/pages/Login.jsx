@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { authService } from '../services';
 
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -13,8 +12,8 @@ export default function Login({ onLogin }) {
     setLoading(true);
 
     try {
-      const data = await authService.login(email, password);
-      onLogin(data.user);
+      // V-01: onLogin triggers AuthContext.login → httpOnly cookie set by server
+      await onLogin(email, password);
     } catch (err) {
       setError(err.response?.data?.error || 'فشل تسجيل الدخول');
     } finally {

@@ -115,7 +115,7 @@ router.get('/export/pdf', authenticateToken, authorizeRoles('super_admin', 'mini
     console.log('PDF sent successfully');
   } catch (error) {
     console.error('Export entities PDF error:', error);
-    res.status(500).json({ error: 'Failed to export PDF: ' + error.message });
+    res.status(500).json({ error: 'Failed to export PDF' });
   }
 });
 
@@ -346,9 +346,20 @@ router.delete('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry
       });
     }
 
-    // Check access for ministry_admin
-    if (req.user.role === 'ministry_admin' && req.user.entity_id !== id) {
-      return res.status(403).json({ error: 'Access denied' });
+    // V-11: ownership check for ministry_admin using recursive entity tree
+    if (req.user.role === 'ministry_admin') {
+      const entityId = parseInt(id, 10);
+      const treeCheck = await query(
+        `WITH RECURSIVE entity_tree AS (
+           SELECT id FROM entities WHERE id = $1
+           UNION ALL
+           SELECT e.id FROM entities e JOIN entity_tree et ON e.parent_entity_id = et.id
+         ) SELECT id FROM entity_tree WHERE id = $2`,
+        [req.user.entity_id, entityId]
+      );
+      if (!treeCheck.rows.length) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
     }
 
     // Delete entity

@@ -461,7 +461,7 @@ function generateHTMLContent(assessment, assessmentData, entity) {
       </tr>
       <tr>
         <td>البنية التحتية مدارة من قبل</td>
-        <td><strong>${step2.infrastructure_managed_by === 'internal' ? 'الجهة نفسها' : step2.infrastructure_managed_by === 'third_party' ? `طرف ثالث (${step2.third_party_name || ''})` : step2.infrastructure_managed_by === 'hybrid' ? `مشترك (${step2.third_party_name || ''})` : 'غير محدد'}</strong></td>
+        <td><strong>${step2.infrastructure_managed_by === 'internal' ? 'الجهة نفسها' : step2.infrastructure_managed_by === 'third_party' ? `طرف ثالث (${escapeHtml(step2.third_party_name || '')})` : step2.infrastructure_managed_by === 'hybrid' ? `مشترك (${escapeHtml(step2.third_party_name || '')})` : 'غير محدد'}</strong></td>
       </tr>
       <tr>
         <td>هل يوجد سجل محدث ودقيق لجميع الأصول التقنية؟</td>
@@ -472,7 +472,7 @@ function generateHTMLContent(assessment, assessmentData, entity) {
         <td>
           <div class="tags">
             ${(step2.network_types || []).map(type => `<span class="tag">${type.toUpperCase()}</span>`).join('')}
-            ${step2.network_types_other ? `<span class="tag">${step2.network_types_other}</span>` : ''}
+            ${step2.network_types_other ? `<span class="tag">${escapeHtml(step2.network_types_other)}</span>` : ''}
           </div>
         </td>
       </tr>
@@ -517,15 +517,15 @@ function generateHTMLContent(assessment, assessmentData, entity) {
         <td>أنواع الخدمات المقدمة</td>
         <td>
           <div class="tags">
-            ${(step3.services || []).map(service => `<span class="tag">${service}</span>`).join('')}
-            ${step3.services_other ? `<span class="tag">${step3.services_other}</span>` : ''}
+            ${(step3.services || []).map(service => `<span class="tag">${escapeHtml(service)}</span>`).join('')}
+            ${step3.services_other ? `<span class="tag">${escapeHtml(step3.services_other)}</span>` : ''}
           </div>
         </td>
       </tr>
       ${step3.service_details ? `
       <tr>
         <td>تفاصيل الخدمة</td>
-        <td>${step3.service_details}</td>
+        <td>${escapeHtml(step3.service_details)}</td>
       </tr>
       ` : ''}
       <tr>
@@ -539,14 +539,14 @@ function generateHTMLContent(assessment, assessmentData, entity) {
       ${step3.has_official_website === 'yes' ? `
       <tr>
         <td>من يدير الموقع؟</td>
-        <td><strong>${step3.website_managed_by === 'internal' ? 'داخلية' : step3.website_managed_by === 'external' ? `خارجية (${step3.website_external_company_name || ''})` : step3.website_managed_by === 'hybrid' ? `مختلطة (${step3.website_external_company_name || ''})` : 'غير محدد'}</strong></td>
+        <td><strong>${step3.website_managed_by === 'internal' ? 'داخلية' : step3.website_managed_by === 'external' ? `خارجية (${escapeHtml(step3.website_external_company_name || '')})` : step3.website_managed_by === 'hybrid' ? `مختلطة (${escapeHtml(step3.website_external_company_name || '')})` : 'غير محدد'}</strong></td>
       </tr>
       ` : ''}
       <tr>
         <td>نوع النطاق (Domain)</td>
         <td><strong>${step3.domain_type || 'غير محدد'}</strong>
         ${step3.domain_type === '.gov.iq' ? '<span class="badge badge-success" style="margin-right: 10px;">✓ نطاق حكومي</span>' : ''}
-        ${step3.domain_type === 'other' && step3.domain_type_other ? `<span class="badge badge-info" style="margin-right: 10px;">${step3.domain_type_other}</span>` : ''}
+        ${step3.domain_type === 'other' && step3.domain_type_other ? `<span class="badge badge-info" style="margin-right: 10px;">${escapeHtml(step3.domain_type_other)}</span>` : ''}
         </td>
       </tr>
       <tr>
@@ -556,7 +556,7 @@ function generateHTMLContent(assessment, assessmentData, entity) {
       ${step3.has_official_email === 'yes' ? `
       <tr>
         <td>اسم النطاق للبريد</td>
-        <td><strong>${step3.email_domain_name || 'غير محدد'}</strong></td>
+        <td><strong>${escapeHtml(step3.email_domain_name || 'غير محدد')}</strong></td>
       </tr>
       <tr>
         <td>نوع البريد الإلكتروني</td>
@@ -603,7 +603,7 @@ function generateHTMLContent(assessment, assessmentData, entity) {
     ${(step4.security_tools && step4.security_tools.length > 0) ? `
       <div class="tags">
         ${step4.security_tools.map(tool => `<span class="tag">${tool.toUpperCase()}</span>`).join('')}
-        ${step4.security_tools_other ? `<span class="tag">${step4.security_tools_other}</span>` : ''}
+        ${step4.security_tools_other ? `<span class="tag">${escapeHtml(step4.security_tools_other)}</span>` : ''}
       </div>
       
       ${!step4.security_tools.includes('iam') ? '<div class="warning-box"><strong>⚠️ مفقود:</strong> إدارة الهوية والوصول (IAM)</div>' : ''}

@@ -38,7 +38,6 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   entity_user: {
     permissions: [
       PERMISSIONS.VIEW_TEMPLATES,
-      PERMISSIONS.VIEW_ASSESSMENTS,
       PERMISSIONS.FILL_ASSESSMENT,
       PERMISSIONS.SUBMIT_ASSESSMENT,
     ],
@@ -70,7 +69,6 @@ export const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
   InstitutionUser: {
     permissions: [
       PERMISSIONS.VIEW_TEMPLATES,
-      PERMISSIONS.VIEW_ASSESSMENTS,
       PERMISSIONS.FILL_ASSESSMENT,
       PERMISSIONS.SUBMIT_ASSESSMENT,
     ],

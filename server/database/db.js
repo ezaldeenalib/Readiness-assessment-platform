@@ -3,14 +3,20 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// V-08: fail fast if any required env var is missing
+const requiredEnvVars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET'];
+for (const v of requiredEnvVars) {
+  if (!process.env[v]) throw new Error(`Required environment variable ${v} is not set. Set it before starting the server.`);
+}
+
 const { Pool } = pg;
 
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST,
   port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'maturity_assessment',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 2000,

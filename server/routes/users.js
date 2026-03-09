@@ -215,4 +215,74 @@ router.put('/:id/institutions', authenticateToken, checkPermission('manage_users
   }
 });
 
+// ─── تحديث حالة تفعيل المستخدم (نشط / معطّل) ─────────────────────
+router.patch('/:id/status', authenticateToken, checkPermission('manage_users'), async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const { is_active } = req.body || {};
+
+    if (typeof is_active !== 'boolean') {
+      return res.status(400).json({ error: 'is_active يجب أن تكون true أو false' });
+    }
+
+    const result = await query(
+      `UPDATE users
+       SET is_active = $1
+       WHERE id = $2
+       RETURNING id, email, full_name, role, entity_id, is_active`,
+      [is_active, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'المستخدم غير موجود' });
+    }
+
+    const user = result.rows[0];
+    const performedBy = req.user?.email || req.user?.full_name || String(req.user?.id ?? 'system');
+    await logAudit(pool, 'users', user.id, 'UPDATE',
+      { is_active: !is_active }, { is_active }, performedBy);
+
+    return res.json({ message: 'تم تحديث حالة المستخدم', user });
+  } catch (err) {
+    console.error('Update user status error:', err);
+    return res.status(500).json({ error: 'فشل تحديث حالة المستخدم' });
+  }
+});
+
+// ─── تغيير كلمة مرور مستخدم (من المدير) ──────────────────────────
+router.put('/:id/password', authenticateToken, checkPermission('manage_users'), async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    const { new_password } = req.body || {};
+
+    if (!new_password) {
+      return res.status(400).json({ error: 'كلمة المرور الجديدة مطلوبة' });
+    }
+
+    const pwErr = validatePassword(new_password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
+
+    const salt = await bcrypt.genSalt(12);
+    const password_hash = await bcrypt.hash(String(new_password), salt);
+
+    const result = await query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2 RETURNING id, email',
+      [password_hash, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'المستخدم غير موجود' });
+    }
+
+    const performedBy = req.user?.email || req.user?.full_name || String(req.user?.id ?? 'system');
+    await logAudit(pool, 'users', userId, 'UPDATE',
+      { password_changed: false }, { password_changed: true }, performedBy);
+
+    return res.json({ message: 'تم تغيير كلمة المرور بنجاح' });
+  } catch (err) {
+    console.error('Admin change user password error:', err);
+    return res.status(500).json({ error: 'فشل تغيير كلمة المرور' });
+  }
+});
+
 export default router;

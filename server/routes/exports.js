@@ -3,7 +3,6 @@ import { query } from '../database/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import generateAssessmentPDF from '../utils/pdfGeneratorNew.js';
 import { generateExcelExport, generateEntityComparisonExcel } from '../utils/excelGenerator.js';
-import XLSX from 'xlsx';
 
 const router = express.Router();
 
@@ -165,9 +164,8 @@ router.get('/excel', authenticateToken, async (req, res) => {
       };
     });
 
-    // Generate Excel
-    const workbook = generateExcelExport(assessments, assessmentDataMap, entitiesMap);
-    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    // Generate Excel (V-10: ExcelJS — no XLSX.write needed, buffer returned directly)
+    const excelBuffer = await generateExcelExport(assessments, assessmentDataMap, entitiesMap);
 
     // Set headers for download
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -214,9 +212,8 @@ router.get('/comparison-excel', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'No data found for comparison' });
     }
 
-    // Generate Excel
-    const workbook = generateEntityComparisonExcel(comparisonData);
-    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    // Generate Excel (V-10: ExcelJS)
+    const excelBuffer = await generateEntityComparisonExcel(comparisonData);
 
     // Set headers for download
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

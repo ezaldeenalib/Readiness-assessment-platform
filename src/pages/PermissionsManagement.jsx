@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { usersService, entityService } from '../services';
+import { usersService, entityService, rbacService } from '../services';
 
 // ─── ثوابت الصلاحيات (نسخة Frontend) ───────────────────────────
 const PERMISSION_GROUPS = [
@@ -127,6 +127,15 @@ export default function PermissionsManagement() {
   const [activeTab, setActiveTab]         = useState('roles');   // 'roles' | 'institutions'
   const [toast, setToast]                 = useState(null);
 
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [newPassword, setNewPassword]             = useState('');
+  const [passwordSaving, setPasswordSaving]       = useState(false);
+
+  const [selectedRoleForEdit, setSelectedRoleForEdit] = useState(null);
+  const [rolePermissions, setRolePermissions]         = useState([]);
+  const [loadingRolePerms, setLoadingRolePerms]       = useState(false);
+  const [savingRolePerms, setSavingRolePerms]         = useState(false);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm]       = useState({
     email: '',
@@ -181,6 +190,45 @@ export default function PermissionsManagement() {
     }
   };
 
+  const loadRolePerms = async (role) => {
+    if (!role) return;
+    setSelectedRoleForEdit(role);
+    setLoadingRolePerms(true);
+    try {
+      const perms = await rbacService.getRolePermissions(role.id);
+      setRolePermissions(perms);
+    } catch (err) {
+      showToast('فشل تحميل صلاحيات الدور: ' + (err.response?.data?.error || err.message), 'error');
+      setRolePermissions([]);
+    } finally {
+      setLoadingRolePerms(false);
+    }
+  };
+
+  const toggleRolePermission = (permKey) => {
+    setRolePermissions(prev => {
+      const has = prev.includes(permKey);
+      if (has) {
+        return prev.filter(p => p !== permKey);
+      }
+      return [...prev, permKey];
+    });
+  };
+
+  const handleSaveRolePermissions = async () => {
+    if (!selectedRoleForEdit) return;
+    setSavingRolePerms(true);
+    try {
+      const updated = await rbacService.updateRolePermissions(selectedRoleForEdit.id, rolePermissions);
+      setRolePermissions(updated);
+      showToast('تم تحديث صلاحيات الدور بنجاح');
+    } catch (err) {
+      showToast('فشل تحديث صلاحيات الدور: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setSavingRolePerms(false);
+    }
+  };
+
   const toggleRole = (role) => {
     const has = userRoles.some(r => r.id === role.id);
     setUserRoles(prev => has ? prev.filter(r => r.id !== role.id) : [...prev, role]);
@@ -216,6 +264,45 @@ export default function PermissionsManagement() {
       showToast('فشل حفظ المؤسسات: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleStatus = async () => {
+    if (!selectedUser) return;
+    try {
+      const targetStatus = !selectedUser.is_active;
+      const { user } = await usersService.toggleStatus(selectedUser.id, targetStatus);
+      setSelectedUser(prev => prev && prev.id === user.id ? { ...prev, is_active: user.is_active } : prev);
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: user.is_active } : u));
+      showToast(targetStatus ? 'تم تفعيل المستخدم' : 'تم تعطيل المستخدم');
+    } catch (err) {
+      showToast('فشل تحديث حالة المستخدم: ' + (err.response?.data?.error || err.message), 'error');
+    }
+  };
+
+  const openPasswordModal = () => {
+    if (!selectedUser) return;
+    setNewPassword('');
+    setPasswordModalOpen(true);
+  };
+
+  const handleResetPassword = async (e) => {
+    e?.preventDefault();
+    if (!selectedUser) return;
+    if (!newPassword || newPassword.length < 6) {
+      showToast('أدخل كلمة مرور قوية (6 أحرف على الأقل)', 'error');
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await usersService.resetPassword(selectedUser.id, newPassword);
+      setPasswordModalOpen(false);
+      setNewPassword('');
+      showToast('تم تعيين كلمة المرور الجديدة بنجاح');
+    } catch (err) {
+      showToast('فشل تغيير كلمة المرور: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setPasswordSaving(false);
     }
   };
 
@@ -541,31 +628,166 @@ export default function PermissionsManagement() {
             <>
               {/* ─── بطاقة المستخدم ─── */}
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col md:flex-row md:items-center md:gap-4 gap-4">
                   <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-xl flex-shrink-0">
                     {(selectedUser.full_name || selectedUser.email).charAt(0).toUpperCase()}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <h2 className="text-lg font-bold text-gray-900">{selectedUser.full_name || '—'}</h2>
-                    <p className="text-sm text-gray-500">{selectedUser.email}</p>
-                    <div className="flex flex-wrap items-center gap-2 mt-2">
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${roleInfo.badge}`}>
-                        {roleInfo.label}
-                      </span>
-                      {selectedUser.entity_name_ar && (
-                        <span className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 font-medium">
-                          {selectedUser.entity_name_ar}
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-900">{selectedUser.full_name || '—'}</h2>
+                      <p className="text-sm text-gray-500">{selectedUser.email}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${roleInfo.badge}`}>
+                          {roleInfo.label}
                         </span>
-                      )}
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${selectedUser.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                        {selectedUser.is_active ? 'نشط' : 'معطّل'}
-                      </span>
+                        {selectedUser.entity_name_ar && (
+                          <span className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-600 font-medium">
+                            {selectedUser.entity_name_ar}
+                          </span>
+                        )}
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${selectedUser.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                          {selectedUser.is_active ? 'نشط' : 'معطّل'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3 mt-2">
+                      <button
+                        type="button"
+                        onClick={handleToggleStatus}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border transition-colors
+                          ${selectedUser.is_active
+                            ? 'border-red-200 text-red-700 bg-red-50 hover:bg-red-100'
+                            : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: selectedUser.is_active ? '#f97373' : '#16a34a' }}></span>
+                        {selectedUser.is_active ? 'تعطيل الحساب' : 'تفعيل الحساب'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openPasswordModal}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border border-gray-200 text-gray-700 bg-gray-50 hover:bg-gray-100"
+                      >
+                        تغيير كلمة المرور
+                      </button>
                     </div>
                   </div>
                   {/* ملخص الصلاحيات */}
                   <div className="hidden sm:flex flex-col items-center bg-blue-50 rounded-xl px-5 py-3 text-center flex-shrink-0">
                     <span className="text-3xl font-bold text-blue-600">{effectivePermissions.size}</span>
                     <span className="text-xs text-blue-500 mt-0.5">صلاحية فعّالة</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* ─── إعداد صلاحيات الأدوار (RBAC) ─── */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold text-gray-900">إعداد صلاحيات الأدوار</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      اختر دوراً من القائمة ثم فعِّل أو عطّل الصلاحيات المرتبطة به. هذه الإعدادات تُطبَّق على جميع المستخدمين الذين لديهم هذا الدور.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                  <div className="lg:col-span-4 space-y-2 max-h-72 overflow-y-auto border border-gray-100 rounded-xl p-2">
+                    {roles.length === 0 && (
+                      <p className="text-xs text-gray-400 px-2 py-3 text-center">لا توجد أدوار متاحة.</p>
+                    )}
+                    {roles.map(role => {
+                      const info = ROLE_INFO[role.name] || { label: role.label_ar || role.name, badge: 'bg-gray-100 text-gray-700', dot: 'bg-gray-400' };
+                      const isActiveRole = selectedRoleForEdit?.id === role.id;
+                      return (
+                        <button
+                          key={role.id}
+                          type="button"
+                          onClick={() => loadRolePerms(role)}
+                          className={`w-full text-right px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 border transition-all
+                            ${isActiveRole ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white hover:bg-gray-50'}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full ${info.dot}`}></span>
+                            <span className="font-medium truncate">{info.label}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="lg:col-span-8">
+                    {!selectedRoleForEdit ? (
+                      <div className="border border-dashed border-gray-200 rounded-xl p-6 text-center text-sm text-gray-500">
+                        اختر دوراً من القائمة على اليسار لعرض وتعديل صلاحياته.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-900">
+                              الصلاحيات المرتبطة بالدور: <span className="text-blue-700">{selectedRoleForEdit.label_ar || selectedRoleForEdit.name}</span>
+                            </h4>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              ضع علامة بجانب كل صلاحية تريد تفعيلها لهذا الدور.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleSaveRolePermissions}
+                            disabled={savingRolePerms || loadingRolePerms}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {savingRolePerms ? (
+                              <div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                            ) : (
+                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                            حفظ صلاحيات الدور
+                          </button>
+                        </div>
+                        {loadingRolePerms ? (
+                          <div className="flex items-center justify-center py-10">
+                            <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {PERMISSION_GROUPS.map(group => {
+                              const c = COLOR[group.color];
+                              return (
+                                <div key={group.key} className={`rounded-xl border ${c.border} ${c.bg} overflow-hidden`}>
+                                  <div className="flex items-center justify-between px-4 py-2.5">
+                                    <div className="flex items-center gap-2">
+                                      <span>{group.icon}</span>
+                                      <span className={`font-semibold text-xs ${c.title}`}>{group.label}</span>
+                                    </div>
+                                  </div>
+                                  <div className="px-4 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                    {group.permissions.map(perm => {
+                                      const checked = rolePermissions.includes(perm.key);
+                                      return (
+                                        <label
+                                          key={perm.key}
+                                          className={`flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg cursor-pointer
+                                            ${checked ? 'text-gray-900 bg-white/60' : 'text-gray-500 hover:bg-white/40'}`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => toggleRolePermission(perm.key)}
+                                            className={`w-4 h-4 rounded ${c.check}`}
+                                          />
+                                          <span>{perm.label}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -809,6 +1031,66 @@ export default function PermissionsManagement() {
           )}
         </div>
       </div>
+
+      {/* ─── نافذة تغيير كلمة المرور ─── */}
+      {passwordModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => !passwordSaving && setPasswordModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">تغيير كلمة المرور</h3>
+              <button
+                type="button"
+                onClick={() => !passwordSaving && setPasswordModalOpen(false)}
+                className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={handleResetPassword} className="p-5 space-y-4">
+              <p className="text-sm text-gray-500">
+                أدخل كلمة مرور جديدة للمستخدم <span className="font-medium text-gray-800">{selectedUser?.full_name || selectedUser?.email}</span>.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">كلمة المرور الجديدة</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-300 focus:border-blue-400"
+                  placeholder="••••••••••"
+                  minLength={6}
+                  required
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => !passwordSaving && setPasswordModalOpen(false)}
+                  className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-gray-700 font-medium hover:bg-gray-50"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={passwordSaving}
+                  className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {passwordSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      جاري الحفظ...
+                    </>
+                  ) : (
+                    'حفظ كلمة المرور'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

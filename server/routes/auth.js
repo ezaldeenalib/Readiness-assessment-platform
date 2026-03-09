@@ -109,9 +109,9 @@ router.post('/login', async (req, res) => {
       maxAge: 15 * 60 * 1000   // 15 minutes
     });
 
+    // V-01: token intentionally omitted from body — rely on httpOnly cookie only
     res.json({
       message: 'Login successful',
-      token,   // kept for backward-compat with existing frontend
       user: {
         id: user.id,
         email: user.email,

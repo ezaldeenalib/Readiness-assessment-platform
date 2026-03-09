@@ -1,8 +1,10 @@
 import express from 'express';
+import crypto from 'crypto';
 import { query, transaction } from '../database/db.js';
 import pool from '../database/db.js';
 import { authenticateToken, checkEntityAccess } from '../middleware/auth.js';
 import { logAudit } from '../utils/auditLog.js';
+import { validateStepData } from '../utils/stepSchemas.js';
 
 const router = express.Router();
 
@@ -197,6 +199,12 @@ router.put('/:id/step/:stepNumber', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'Step number must be between 1 and 7' });
     }
 
+    // V-13: validate step data against schema
+    const validation = validateStepData(step, data);
+    if (!validation.success) {
+      return res.status(400).json({ error: 'Invalid step data', details: validation.error });
+    }
+
     // Check if assessment exists and user has access
     const assessmentResult = await query(
       `SELECT entity_id, status FROM assessments WHERE id = $1`,
@@ -315,8 +323,9 @@ router.post('/:id/submit', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Submit assessment error:', error);
-    res.status(500).json({ error: 'Failed to submit assessment', details: error.message });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}] Submit assessment error:`, error);
+    res.status(500).json({ error: 'An internal error occurred', errorId });
   } finally {
     client.release();
   }
@@ -384,12 +393,9 @@ router.post('/:id/snapshot', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Create snapshot error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to create snapshot',
-      details: error.message 
-    });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}] Create snapshot error:`, error);
+    res.status(500).json({ success: false, error: 'An internal error occurred', errorId });
   } finally {
     client.release();
   }
@@ -446,12 +452,9 @@ router.get('/:id/answers', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Get assessment answers error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: 'Failed to fetch assessment answers',
-      details: error.message 
-    });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}] Get assessment answers error:`, error);
+    res.status(500).json({ success: false, error: 'An internal error occurred', errorId });
   }
 });
 

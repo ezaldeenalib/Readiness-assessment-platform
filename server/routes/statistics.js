@@ -2,7 +2,7 @@ import express from 'express';
 import { query } from '../database/db.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 import { checkPermission } from '../middleware/checkPermission.js';
-import XLSX from 'xlsx';
+import ExcelJS from 'exceljs'; // V-10: replaced xlsx with exceljs
 import generateStatisticsReport from '../utils/statisticsPdfGenerator.js';
 
 const router = express.Router();
@@ -588,32 +588,34 @@ router.get('/export/excel', authenticateToken, checkPermission('export_reports')
     const assessments = processAssessments(assessmentsResult.rows);
     console.log('Processed assessments:', assessments.length);
 
-    // Create Excel workbook
+    // Create Excel workbook (V-10: ExcelJS)
     console.log('Creating Excel workbook...');
-    const workbook = XLSX.utils.book_new();
+    const workbook = new ExcelJS.Workbook();
+
+    function addJsonSheet(wb, sheetName, rows) {
+      if (!rows.length) return;
+      const ws = wb.addWorksheet(sheetName);
+      ws.columns = Object.keys(rows[0]).map(k => ({ header: k, key: k, width: Math.min(40, Math.max(12, k.length + 4)) }));
+      rows.forEach(r => ws.addRow(r));
+      ws.getRow(1).eachCell(cell => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+      });
+    }
 
     // Sheet 1: Summary
-    const summaryData = assessments.map(a => {
-      const step1 = a.data.step1 || {};
-      const step2 = a.data.step2 || {};
-      const step3 = a.data.step3 || {};
-      const step4 = a.data.step4 || {};
-      const step5 = a.data.step5 || {};
-      const step6 = a.data.step6 || {};
+    addJsonSheet(workbook, 'ملخص شامل', assessments.map(a => {
+      const step1 = a.data.step1 || {}; const step2 = a.data.step2 || {};
+      const step3 = a.data.step3 || {}; const step4 = a.data.step4 || {};
+      const step5 = a.data.step5 || {}; const step6 = a.data.step6 || {};
       const step7 = a.data.step7 || {};
-
       return {
-        'اسم الجهة': a.entity_name,
-        'السنة': a.year,
-        'الربع': a.quarter || '-',
-        'درجة النضج': a.maturity_score || 'لم يتم الحساب',
-        'مستوى المخاطر': a.risk_level || '-',
-        'إجمالي الموظفين': step1.total_employees || 0,
-        'موظفي IT': step1.it_staff || 0,
+        'اسم الجهة': a.entity_name, 'السنة': a.year, 'الربع': a.quarter || '-',
+        'درجة النضج': a.maturity_score || 'لم يتم الحساب', 'مستوى المخاطر': a.risk_level || '-',
+        'إجمالي الموظفين': step1.total_employees || 0, 'موظفي IT': step1.it_staff || 0,
         'موظفي الأمن السيبراني': step1.cybersecurity_staff || 0,
         'نسبة الأمن السيبراني': step1.total_employees ? ((step1.cybersecurity_staff / step1.total_employees) * 100).toFixed(2) + '%' : '-',
-        'عدد مراكز البيانات': step2.data_center_count || 0,
-        'الخوادم الفيزيائية': step2.physical_servers || 0,
+        'عدد مراكز البيانات': step2.data_center_count || 0, 'الخوادم الفيزيائية': step2.physical_servers || 0,
         'الخوادم الافتراضية': step2.virtual_servers || 0,
         'سعة التخزين': (step2.storage_amount || 0) + ' ' + (step2.storage_unit || 'TB'),
         'إدارة البنية التحتية': step2.infrastructure_managed_by || '-',
@@ -630,45 +632,31 @@ router.get('/export/excel', authenticateToken, checkPermission('export_reports')
         'عدد الفروع': step6.has_subsidiaries === 'yes' ? step6.subsidiary_count : 0,
         'مدقق خارجي': step6.has_external_security_auditor === 'yes' ? 'نعم' : 'لا',
         'المحاكاة الافتراضية': step7.uses_virtualization === 'yes' ? 'نعم' : 'لا',
-        'SOC': step7.has_soc || 'لا',
-        'NOC': step7.has_noc || 'لا',
+        'SOC': step7.has_soc || 'لا', 'NOC': step7.has_noc || 'لا',
         'خطة التعافي': step7.disaster_recovery || 'لا',
         'نسخ احتياطي منتظم': step7.backup_regularly === 'yes' ? 'نعم' : 'لا',
         'التحول الرقمي': step7.digital_reliance_level || '-',
         'تقارير المركز الوطني': step7.national_center_cybersecurity_reports || 'لا',
       };
-    });
-
-    const summarySheet = XLSX.utils.json_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(workbook, summarySheet, 'ملخص شامل');
+    }));
 
     // Sheet 2: Workforce Analysis
-    const workforceData = assessments.map(a => {
+    addJsonSheet(workbook, 'القوى البشرية', assessments.map(a => {
       const step1 = a.data.step1 || {};
       const total = parseInt(step1.total_employees) || 0;
       const cyber = parseInt(step1.cybersecurity_staff) || 0;
-      
       return {
-        'الجهة': a.entity_name,
-        'إجمالي الموظفين': total,
-        'موظفي الأمن السيبراني': cyber,
+        'الجهة': a.entity_name, 'إجمالي الموظفين': total, 'موظفي الأمن السيبراني': cyber,
         'النسبة المئوية': total > 0 ? ((cyber / total) * 100).toFixed(2) + '%' : '-',
-        'التصنيف': total > 0 ? (
-          (cyber / total) >= 0.02 ? 'ممتاز' :
-          (cyber / total) >= 0.01 ? 'جيد' :
-          (cyber / total) >= 0.005 ? 'مقبول' : 'حرج'
-        ) : '-',
+        'التصنيف': total > 0 ? ((cyber / total) >= 0.02 ? 'ممتاز' : (cyber / total) >= 0.01 ? 'جيد' : (cyber / total) >= 0.005 ? 'مقبول' : 'حرج') : '-',
       };
-    });
-    const workforceSheet = XLSX.utils.json_to_sheet(workforceData);
-    XLSX.utils.book_append_sheet(workbook, workforceSheet, 'القوى البشرية');
+    }));
 
     // Sheet 3: Compliance
-    const complianceData = assessments.map(a => {
+    addJsonSheet(workbook, 'الامتثال', assessments.map(a => {
       const step4 = a.data.step4 || {};
       const compliance = step4.compliance || [];
       const levels = step4.compliance_levels || {};
-      
       return {
         'الجهة': a.entity_name,
         'ISO 27001': compliance.includes('ISO 27001') ? (levels['ISO 27001'] === 'full' ? 'كلي' : 'جزئي') : 'لا',
@@ -677,16 +665,12 @@ router.get('/export/excel', authenticateToken, checkPermission('export_reports')
         'GDPR': compliance.includes('GDPR') ? 'نعم' : 'لا',
         'عدد المعايير': compliance.length,
       };
-    });
-    const complianceSheet = XLSX.utils.json_to_sheet(complianceData);
-    XLSX.utils.book_append_sheet(workbook, complianceSheet, 'الامتثال');
+    }));
 
     // Sheet 4: Critical Gaps
-    const gapsData = assessments.map(a => {
-      const step4 = a.data.step4 || {};
-      const step7 = a.data.step7 || {};
+    addJsonSheet(workbook, 'الثغرات الحرجة', assessments.map(a => {
+      const step4 = a.data.step4 || {}; const step7 = a.data.step7 || {};
       const tools = step4.security_tools || [];
-      
       return {
         'الجهة': a.entity_name,
         'SOC': step7.has_soc === 'yes' ? 'يوجد' : 'لا يوجد',
@@ -698,14 +682,12 @@ router.get('/export/excel', authenticateToken, checkPermission('export_reports')
         'نسخ احتياطي': step7.backup_regularly === 'yes' ? 'يوجد' : 'لا يوجد',
         'تدريب أمني': step4.security_training_program === 'yes' ? 'يوجد' : 'لا يوجد',
       };
-    });
-    const gapsSheet = XLSX.utils.json_to_sheet(gapsData);
-    XLSX.utils.book_append_sheet(workbook, gapsSheet, 'الثغرات الحرجة');
+    }));
 
     // Generate Excel buffer
     console.log('Generating Excel buffer...');
-    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    console.log('Excel generated, size:', buffer.length);
+    const buffer = await workbook.xlsx.writeBuffer();
+    console.log('Excel generated, size:', buffer.byteLength);
 
     // Send file
     const filename = `statistics_report_${new Date().toISOString().split('T')[0]}.xlsx`;
@@ -718,7 +700,7 @@ router.get('/export/excel', authenticateToken, checkPermission('export_reports')
   } catch (error) {
     console.error('Export Excel error:', error);
     console.error('Error stack:', error.stack);
-    res.status(500).json({ error: 'Failed to export Excel: ' + error.message });
+    res.status(500).json({ error: 'Failed to export Excel' });
   }
 });
 
@@ -775,7 +757,7 @@ router.get('/export/pdf', authenticateToken, checkPermission('export_reports'), 
   } catch (error) {
     console.error('Export PDF error:', error);
     console.error('Error stack:', error.stack);
-    res.status(500).json({ error: 'Failed to export PDF: ' + error.message });
+    res.status(500).json({ error: 'Failed to export PDF' });
   }
 });
 

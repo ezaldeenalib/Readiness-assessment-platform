@@ -9,23 +9,52 @@ const api = axios.create({
   withCredentials: true,
 });
 
-// V-09: keep Authorization header as fallback for backward-compat
-// (server accepts both cookie and Bearer token)
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+// V-06: CSRF token cache — invalidated after login/logout (session identifier changes)
+let csrfToken = null;
+
+export function clearCsrfToken() {
+  csrfToken = null;
+}
+
+async function getCsrfToken() {
+  if (csrfToken) return csrfToken;
+  try {
+    // Use a plain axios call (not the `api` instance) to avoid interceptor recursion
+    const res = await axios.get(`${API_URL}/csrf-token`, { withCredentials: true });
+    csrfToken = res.data.token;
+  } catch {
+    csrfToken = null;
+  }
+  return csrfToken;
+}
+
+const STATE_CHANGING_METHODS = ['post', 'put', 'patch', 'delete'];
+
+// V-01: no longer reads token from localStorage — rely solely on httpOnly cookie
+// V-06: attach x-csrf-token header for state-changing requests
+api.interceptors.request.use(async (config) => {
+  if (STATE_CHANGING_METHODS.includes(config.method?.toLowerCase())) {
+    const token = await getCsrfToken();
+    if (token) config.headers['x-csrf-token'] = token;
   }
   return config;
 });
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
+  async (error) => {
+    // On 403, refresh CSRF token and retry once (session identifier may have changed)
+    if (error.response?.status === 403 && !error.config._csrfRetried) {
+      csrfToken = null;
+      error.config._csrfRetried = true;
+      const newToken = await getCsrfToken();
+      if (newToken) {
+        error.config.headers['x-csrf-token'] = newToken;
+        return api(error.config);
+      }
+    }
+    if (error.response?.status === 401) {
       if (window.location.pathname !== '/login') {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
         window.location.href = '/login';
       }
     }

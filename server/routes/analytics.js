@@ -97,6 +97,25 @@ router.get('/maturity-score/:assessmentId', authenticateToken, async (req, res) 
   try {
     const { assessmentId } = req.params;
 
+    // V-04: ownership check before reading or writing score
+    const asmOwner = await query('SELECT entity_id FROM assessments WHERE id = $1', [assessmentId]);
+    if (!asmOwner.rows.length) return res.status(404).json({ error: 'Assessment not found' });
+    const entityId = asmOwner.rows[0].entity_id;
+
+    if (req.user.role === 'entity_user') {
+      const allowed = req.user.institutions?.length > 0 ? req.user.institutions : (req.user.entity_id ? [req.user.entity_id] : []);
+      if (!allowed.includes(entityId)) return res.status(403).json({ error: 'Access denied' });
+    } else if (req.user.role === 'ministry_admin') {
+      const treeCheck = await query(
+        `WITH RECURSIVE entity_tree AS (
+           SELECT id FROM entities WHERE id = $1
+           UNION ALL SELECT e.id FROM entities e JOIN entity_tree et ON e.parent_entity_id = et.id
+         ) SELECT id FROM entity_tree WHERE id = $2`,
+        [req.user.entity_id, entityId]
+      );
+      if (!treeCheck.rows.length) return res.status(403).json({ error: 'Access denied' });
+    }
+
     // Get all assessment data
     const dataResult = await query(
       `SELECT step_number, data FROM assessment_data 
@@ -137,6 +156,21 @@ router.get('/maturity-score/:assessmentId', authenticateToken, async (req, res) 
 router.get('/entity-summary/:entityId', authenticateToken, async (req, res) => {
   try {
     const { entityId } = req.params;
+
+    // V-04: ownership check
+    if (req.user.role === 'entity_user') {
+      const allowed = req.user.institutions?.length > 0 ? req.user.institutions : (req.user.entity_id ? [req.user.entity_id] : []);
+      if (!allowed.includes(parseInt(entityId, 10))) return res.status(403).json({ error: 'Access denied' });
+    } else if (req.user.role === 'ministry_admin') {
+      const treeCheck = await query(
+        `WITH RECURSIVE entity_tree AS (
+           SELECT id FROM entities WHERE id = $1
+           UNION ALL SELECT e.id FROM entities e JOIN entity_tree et ON e.parent_entity_id = et.id
+         ) SELECT id FROM entity_tree WHERE id = $2`,
+        [req.user.entity_id, parseInt(entityId, 10)]
+      );
+      if (!treeCheck.rows.length) return res.status(403).json({ error: 'Access denied' });
+    }
 
     // Get entity assessments summary
     const result = await query(
@@ -215,6 +249,21 @@ router.get('/ministry-dashboard/:ministryId', authenticateToken, async (req, res
   try {
     const { ministryId } = req.params;
 
+    // V-04: entity_user cannot access ministry dashboards; ministry_admin only their own tree
+    if (req.user.role === 'entity_user') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    if (req.user.role === 'ministry_admin') {
+      const treeCheck = await query(
+        `WITH RECURSIVE entity_tree AS (
+           SELECT id FROM entities WHERE id = $1
+           UNION ALL SELECT e.id FROM entities e JOIN entity_tree et ON e.parent_entity_id = et.id
+         ) SELECT id FROM entity_tree WHERE id = $2`,
+        [req.user.entity_id, parseInt(ministryId, 10)]
+      );
+      if (!treeCheck.rows.length) return res.status(403).json({ error: 'Access denied' });
+    }
+
     // Get all child entities with their latest assessment
     const result = await query(
       `SELECT 
@@ -263,7 +312,7 @@ router.get('/ministry-dashboard/:ministryId', authenticateToken, async (req, res
     });
   } catch (error) {
     console.error('Get ministry dashboard error:', error);
-    res.status(500).json({ error: 'Failed to fetch ministry dashboard', details: error.message });
+    res.status(500).json({ error: 'Failed to fetch ministry dashboard' });
   }
 });
 

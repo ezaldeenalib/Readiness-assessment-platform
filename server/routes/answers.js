@@ -4,6 +4,7 @@
  */
 
 import express from 'express';
+import crypto from 'crypto';
 import { query, transaction } from '../database/db.js';
 import pool from '../database/db.js';
 import { authenticateToken, checkEntityAccess } from '../middleware/auth.js';
@@ -90,12 +91,9 @@ router.get('/institution/:institutionId', authenticateToken, async (req, res) =>
     });
 
   } catch (error) {
-    console.error('Error fetching answers:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch answers',
-      error: error.message 
-    });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}] Error fetching answers:`, error);
+    res.status(500).json({ success: false, message: 'An internal error occurred', errorId });
   }
 });
 
@@ -125,18 +123,28 @@ router.get('/:id', authenticateToken, async (req, res) => {
       });
     }
 
+    const answer = result.rows[0];
+
+    // V-03: ownership check — entity_user may only access their own institution's answers
+    if (req.user.role === 'entity_user') {
+      const allowed = req.user.institutions?.length > 0
+        ? req.user.institutions
+        : (req.user.entity_id ? [req.user.entity_id] : []);
+      if (!allowed.includes(answer.institution_id)) {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+      }
+    }
+
     res.json({
       success: true,
-      answer: result.rows[0]
+      answer
     });
 
   } catch (error) {
     console.error('Error fetching answer:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch answer',
-      error: error.message 
-    });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}]`, error);
+    res.status(500).json({ success: false, message: 'An internal error occurred', errorId });
   }
 });
 
@@ -271,12 +279,9 @@ router.post('/', authenticateToken, async (req, res) => {
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error saving answer:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to save answer',
-      error: error.message 
-    });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}] Error saving answer:`, error);
+    res.status(500).json({ success: false, message: 'An internal error occurred', errorId });
   } finally {
     client.release();
   }
@@ -358,12 +363,9 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error deleting answer:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to delete answer',
-      error: error.message 
-    });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}] Error deleting answer:`, error);
+    res.status(500).json({ success: false, message: 'An internal error occurred', errorId });
   } finally {
     client.release();
   }
@@ -422,12 +424,9 @@ router.get('/audit/:institutionId', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error fetching audit log:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to fetch audit log',
-      error: error.message 
-    });
+    const errorId = crypto.randomUUID();
+    console.error(`[${errorId}] Error fetching audit log:`, error);
+    res.status(500).json({ success: false, message: 'An internal error occurred', errorId });
   }
 });
 

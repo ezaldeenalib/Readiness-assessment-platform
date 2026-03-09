@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { authService } from './services';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import EntityManagement from './pages/EntityManagement';
@@ -17,33 +17,15 @@ import ReferencesDictionaryManagement from './pages/ReferencesDictionaryManageme
 import PermissionsManagement from './pages/PermissionsManagement';
 import Layout from './components/Layout';
 
-function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+function AppRoutes() {
+  const { user, loading, login, logout } = useAuth();
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      if (authService.isAuthenticated()) {
-        try {
-          const userData = await authService.getCurrentUser();
-          setUser(userData);
-        } catch {
-          const userData = authService.getCurrentUserFromStorage();
-          setUser(userData);
-        }
-      }
-      setLoading(false);
-    };
-    checkAuth();
-  }, []);
-
-  const handleLogin = (userData) => {
-    setUser(userData);
+  const handleLogin = async (email, password) => {
+    return await login(email, password);
   };
 
   const handleLogout = () => {
-    authService.logout();
-    setUser(null);
+    logout();
   };
 
   if (loading) {
@@ -55,7 +37,6 @@ function App() {
   }
 
   return (
-    <Router>
       <Routes>
         <Route
           path="/login"
@@ -264,7 +245,16 @@ function App() {
         
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-    </Router>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <AppRoutes />
+      </Router>
+    </AuthProvider>
   );
 }
 

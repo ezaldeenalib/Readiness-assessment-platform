@@ -1,24 +1,18 @@
 import api from './api';
 
 export const authService = {
+  // V-01: no token written to localStorage — httpOnly cookie is set by server
   async login(email, password) {
     const response = await api.post('/auth/login', { email, password });
-    if (response.data.token) {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-    }
     return response.data;
   },
 
   async register(userData) {
     const response = await api.post('/auth/register', userData);
-    if (response.data.token) {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-    }
     return response.data;
   },
 
+  // V-02: always fetch user from server — never from localStorage
   async getCurrentUser() {
     const response = await api.get('/auth/me');
     return response.data.user;
@@ -32,19 +26,19 @@ export const authService = {
     return response.data;
   },
 
-  logout() {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.location.href = '/login';
+  async logout() {
+    try { await api.post('/auth/logout'); } catch { /* best-effort */ }
+    // Redirect is handled by AuthContext after cleanup
   },
 
+  // V-02: kept for legacy call-sites but always returns null; use AuthContext instead
   getCurrentUserFromStorage() {
-    const userStr = localStorage.getItem('user');
-    return userStr ? JSON.parse(userStr) : null;
+    return null;
   },
 
+  // V-01: isAuthenticated now relies on /auth/me round-trip (see AuthContext)
   isAuthenticated() {
-    return !!localStorage.getItem('token');
+    return false;
   },
 };
 
@@ -76,6 +70,28 @@ export const usersService = {
   async updateUserInstitutions(userId, institutionIds) {
     const response = await api.put(`/users/${userId}/institutions`, { institution_ids: institutionIds });
     return response.data;
+  },
+
+  async toggleStatus(userId, isActive) {
+    const response = await api.patch(`/users/${userId}/status`, { is_active: isActive });
+    return response.data;
+  },
+
+  async resetPassword(userId, newPassword) {
+    const response = await api.put(`/users/${userId}/password`, { new_password: newPassword });
+    return response.data;
+  },
+};
+
+export const rbacService = {
+  async getRolePermissions(roleId) {
+    const response = await api.get(`/roles/${roleId}/permissions`);
+    return response.data.permissions || [];
+  },
+
+  async updateRolePermissions(roleId, permissions) {
+    const response = await api.put(`/roles/${roleId}/permissions`, { permissions });
+    return response.data.permissions || [];
   },
 };
 
