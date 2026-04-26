@@ -35,8 +35,8 @@ router.get('/', authenticateToken, async (req, res) => {
     let sql = `
       SELECT 
         q.id,
-        q.text_en,
-        q.text_ar,
+        q.question_text AS text_en,
+        q.question_text_ar AS text_ar,
         q.question_type,
         q.parent_question_id,
         q.trigger_answer_value,
@@ -57,23 +57,19 @@ router.get('/', authenticateToken, async (req, res) => {
       sql += `,
         a.id as answer_id,
         a.answer_value,
-        a.is_active as answer_is_active,
-        a.assessment_id
+        a.template_assessment_id as assessment_id
       `;
     }
 
     sql += `
-      FROM Questions q
+      FROM questions q
       LEFT JOIN master_categories mc ON q.category_id = mc.id
     `;
 
-    // JOIN مع Answers إذا طُلب
+    // JOIN مع question_answers إذا طُلب
     if (include_answers === 'true' && institution_id) {
       sql += `
-        LEFT JOIN Answers a ON a.question_id = q.id
-          AND a.institution_id = $${1}
-          AND a.is_active = TRUE
-          AND a.assessment_id IS NULL
+        LEFT JOIN question_answers a ON a.question_id = q.id
       `;
     }
 
@@ -81,11 +77,6 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const params = [];
     let paramCount = 1;
-
-    if (include_answers === 'true' && institution_id) {
-      params.push(institution_id);
-      paramCount++;
-    }
 
     if (type) {
       sql += ` AND q.question_type = $${paramCount}`;
@@ -110,7 +101,7 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 
     if (search) {
-      sql += ` AND (q.text_en ILIKE $${paramCount} OR q.text_ar ILIKE $${paramCount})`;
+      sql += ` AND (q.question_text ILIKE $${paramCount} OR q.question_text_ar ILIKE $${paramCount})`;
       params.push(`%${search}%`);
       paramCount++;
     }
@@ -125,7 +116,6 @@ router.get('/', authenticateToken, async (req, res) => {
 
     result.rows.forEach(row => {
       if (!row.parent_question_id) {
-        // سؤال جذر
         questionsMap.set(row.id, { ...row, child_questions: [] });
         rootQuestions.push(questionsMap.get(row.id));
       }
@@ -165,40 +155,24 @@ router.get('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { institution_id, include_answers = 'false' } = req.query;
 
-    // الحصول على السؤال الرئيسي
-    let sql = `
-      SELECT 
-        q.*
-    `;
+    let sql = `SELECT q.*`;
 
     if (include_answers === 'true' && institution_id) {
       sql += `,
         a.id as answer_id,
-        a.answer_value,
-        a.is_active as answer_is_active
+        a.answer_value
       `;
     }
 
-    sql += `
-      FROM Questions q
-    `;
+    sql += ` FROM questions q`;
 
     if (include_answers === 'true' && institution_id) {
-      sql += `
-        LEFT JOIN Answers a ON a.question_id = q.id
-          AND a.institution_id = $2
-          AND a.is_active = TRUE
-          AND a.assessment_id IS NULL
-      `;
+      sql += ` LEFT JOIN question_answers a ON a.question_id = q.id`;
     }
 
     sql += ` WHERE q.id = $1`;
 
     const params = [id];
-    if (include_answers === 'true' && institution_id) {
-      params.push(institution_id);
-    }
-
     const result = await query(sql, params);
 
     if (result.rows.length === 0) {
@@ -211,21 +185,19 @@ router.get('/:id', authenticateToken, async (req, res) => {
     const question = result.rows[0];
 
     // الحصول على الأسئلة الفرعية
-    const childQuestions = await query(`
-      SELECT q.*
-      ${include_answers === 'true' && institution_id ? `
-        , a.id as answer_id,
-        a.answer_value,
-        a.is_active as answer_is_active
-        FROM Questions q
-        LEFT JOIN Answers a ON a.question_id = q.id
-          AND a.institution_id = $2
-          AND a.is_active = TRUE
-          AND a.assessment_id IS NULL
-      ` : 'FROM Questions q'}
-      WHERE q.parent_question_id = $1
-      ORDER BY q.created_at
-    `, include_answers === 'true' && institution_id ? [id, institution_id] : [id]);
+    let childSql = `SELECT q.*`;
+    if (include_answers === 'true' && institution_id) {
+      childSql += `, a.id as answer_id, a.answer_value
+        FROM questions q
+        LEFT JOIN question_answers a ON a.question_id = q.id
+      `;
+    } else {
+      childSql += ` FROM questions q`;
+    }
+    childSql += ` WHERE q.parent_question_id = $1 ORDER BY q.created_at`;
+
+    const childParams = include_answers === 'true' && institution_id ? [id, institution_id] : [id];
+    const childQuestions = await query(childSql, childParams);
 
     question.child_questions = childQuestions.rows;
 
@@ -270,7 +242,7 @@ router.post('/', authenticateToken, authorizeRoles('super_admin', 'ministry_admi
       });
     }
 
-    // التحقق من صحة نوع السؤال (مصدر واحد للحقيقة: constants/questionTypes.js)
+    // التحقق من صحة نوع السؤال
     const typeValidation = validateQuestionType(question_type);
     if (!typeValidation.valid) {
       return res.status(400).json({ 
@@ -299,7 +271,6 @@ router.post('/', authenticateToken, authorizeRoles('super_admin', 'ministry_admi
       }
     }
 
-    // التحقق من اختيار أكثر من إجابة (MultiSelect): خيارات كالمعتاد (يمكن إضافة خيار "أخرى" ليفتح إضافة عدة إجابات عند الإجابة)
     if (question_type === 'MultiSelect') {
       const opts = options && typeof options === 'object' && !Array.isArray(options);
       const mainKeys = opts ? Object.keys(options).filter(k => k !== '__other_options' && k !== '__otherOptionKey') : [];
@@ -322,17 +293,15 @@ router.post('/', authenticateToken, authorizeRoles('super_admin', 'ministry_admi
     // التحقق من الأسئلة الفرعية
     if (parent_question_id) {
       const parentCheck = await query(
-        'SELECT id FROM Questions WHERE id = $1',
+        'SELECT id FROM questions WHERE id = $1',
         [parent_question_id]
       );
-
       if (parentCheck.rows.length === 0) {
         return res.status(404).json({ 
           success: false, 
           message: 'Parent question not found' 
         });
       }
-
       if (!trigger_answer_value) {
         return res.status(400).json({ 
           success: false, 
@@ -359,8 +328,8 @@ router.post('/', authenticateToken, authorizeRoles('super_admin', 'ministry_admi
     }
 
     const result = await query(`
-      INSERT INTO Questions (
-        text_en, text_ar, question_type,
+      INSERT INTO questions (
+        question_text, question_text_ar, question_type,
         parent_question_id, trigger_answer_value,
         composite_columns, options, weight, category_id, category
       )
@@ -376,16 +345,20 @@ router.post('/', authenticateToken, authorizeRoles('super_admin', 'ministry_admi
       optionsVal,
       weight || 1,
       finalCategoryId,
-      category || null // Keep for backward compatibility
+      category || null
     ]);
 
     const row = result.rows[0];
-    await logAudit(pool, 'Questions', row.id, 'INSERT', null, { text_ar: row.text_ar, question_type: row.question_type, weight: row.weight }, performedBy(req));
+    await logAudit(pool, 'questions', row.id, 'INSERT', null, { question_text_ar: row.question_text_ar, question_type: row.question_type, weight: row.weight }, performedBy(req));
 
     res.status(201).json({
       success: true,
       message: 'Question created successfully',
-      question: row
+      question: {
+        ...row,
+        text_en: row.question_text,
+        text_ar: row.question_text_ar
+      }
     });
 
   } catch (error) {
@@ -422,12 +395,15 @@ router.put('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry_ad
       options,
       weight,
       category_id,
-      category, // Legacy support
+      category,
       is_active
     } = req.body;
 
     // التحقق من وجود السؤال والحصول على القيم القديمة للتدقيق
-    const oldResult = await query('SELECT id, text_ar, question_type, weight, is_active FROM Questions WHERE id = $1', [id]);
+    const oldResult = await query(
+      'SELECT id, question_text_ar, question_type, weight, is_active FROM questions WHERE id = $1',
+      [id]
+    );
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ 
         success: false, 
@@ -436,7 +412,6 @@ router.put('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry_ad
     }
     const oldRow = oldResult.rows[0];
 
-    // إذا تم إرسال question_type، التحقق من صحته قبل التحديث
     if (question_type !== undefined && question_type !== null) {
       const typeValidation = validateQuestionType(question_type);
       if (!typeValidation.valid) {
@@ -444,7 +419,7 @@ router.put('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry_ad
       }
     }
 
-    // Handle category_id - if category (legacy) is provided, try to find category_id
+    // Handle category_id lookup from legacy category name
     let finalCategoryId = category_id;
     if (finalCategoryId === undefined && category) {
       const categoryResult = await query(
@@ -464,9 +439,9 @@ router.put('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry_ad
       : undefined;
 
     const result = await query(`
-      UPDATE Questions SET
-        text_en = COALESCE($1, text_en),
-        text_ar = COALESCE($2, text_ar),
+      UPDATE questions SET
+        question_text = COALESCE($1, question_text),
+        question_text_ar = COALESCE($2, question_text_ar),
         question_type = COALESCE($3, question_type),
         parent_question_id = $4,
         trigger_answer_value = $5,
@@ -489,12 +464,21 @@ router.put('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry_ad
     ]);
 
     const newRow = result.rows[0];
-    await logAudit(pool, 'Questions', parseInt(id), 'UPDATE', { text_ar: oldRow.text_ar, question_type: oldRow.question_type, is_active: oldRow.is_active }, { text_ar: newRow.text_ar, question_type: newRow.question_type, is_active: newRow.is_active }, performedBy(req));
+    await logAudit(
+      pool, 'questions', parseInt(id), 'UPDATE',
+      { question_text_ar: oldRow.question_text_ar, question_type: oldRow.question_type, is_active: oldRow.is_active },
+      { question_text_ar: newRow.question_text_ar, question_type: newRow.question_type, is_active: newRow.is_active },
+      performedBy(req)
+    );
 
     res.json({
       success: true,
       message: 'Question updated successfully',
-      question: newRow
+      question: {
+        ...newRow,
+        text_en: newRow.question_text,
+        text_ar: newRow.question_text_ar
+      }
     });
 
   } catch (error) {
@@ -514,8 +498,10 @@ router.delete('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry
   try {
     const { id } = req.params;
 
-    // التحقق من وجود السؤال والحصول على القيم القديمة للتدقيق
-    const oldResult = await query('SELECT id, text_ar, is_active FROM Questions WHERE id = $1', [id]);
+    const oldResult = await query(
+      'SELECT id, question_text_ar, is_active FROM questions WHERE id = $1',
+      [id]
+    );
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ 
         success: false, 
@@ -525,27 +511,26 @@ router.delete('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry
 
     // التحقق من وجود إجابات مرتبطة
     const answersCheck = await query(
-      'SELECT COUNT(*) as count FROM Answers WHERE question_id = $1 AND is_active = TRUE',
+      'SELECT COUNT(*) as count FROM question_answers WHERE question_id = $1',
       [id]
     );
 
     if (parseInt(answersCheck.rows[0].count) > 0) {
       return res.status(400).json({ 
         success: false, 
-        message: 'Cannot delete question with active answers. Deactivate it instead.',
+        message: 'Cannot delete question with existing answers. Deactivate it instead.',
         active_answers_count: answersCheck.rows[0].count
       });
     }
 
-    // Soft delete
     const result = await query(`
-      UPDATE Questions 
+      UPDATE questions 
       SET is_active = FALSE, updated_at = NOW()
       WHERE id = $1 
       RETURNING id
     `, [id]);
 
-    await logAudit(pool, 'Questions', parseInt(id), 'UPDATE', { is_active: oldResult.rows[0].is_active }, { is_active: false }, performedBy(req));
+    await logAudit(pool, 'questions', parseInt(id), 'UPDATE', { is_active: oldResult.rows[0].is_active }, { is_active: false }, performedBy(req));
 
     res.json({
       success: true,
@@ -568,7 +553,6 @@ router.delete('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry
 // ============================================
 router.get('/meta/categories', authenticateToken, async (req, res) => {
   try {
-    // Get categories from master_categories with usage counts
     const result = await query(`
       SELECT 
         mc.id,
@@ -577,10 +561,9 @@ router.get('/meta/categories', authenticateToken, async (req, res) => {
         COUNT(DISTINCT q.id) as count,
         mc.is_active
       FROM master_categories mc
-      LEFT JOIN Questions q ON q.category_id = mc.id AND q.is_active = TRUE
+      LEFT JOIN questions q ON q.category_id = mc.id AND q.is_active = TRUE
       WHERE mc.is_active = TRUE
       GROUP BY mc.id, mc.name_en, mc.name_ar, mc.is_active
-      HAVING COUNT(DISTINCT q.id) > 0
       ORDER BY mc.name_ar, mc.name_en
     `);
 
@@ -591,7 +574,6 @@ router.get('/meta/categories', authenticateToken, async (req, res) => {
         name_en: row.name_en,
         name_ar: row.name_ar,
         count: parseInt(row.count),
-        // Legacy format for backward compatibility
         category: row.name_ar || row.name_en
       }))
     });

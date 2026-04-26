@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 
@@ -7,23 +7,11 @@ export default function Dashboard({ user }) {
   const [recentAssessments, setRecentAssessments] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadDashboard();
-  }, []);
-
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     try {
       setLoading(true);
-      
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('❌ No token found in localStorage');
-        alert('يرجى تسجيل الدخول أولاً');
-        window.location.href = '/login';
-        return;
-      }
-
-      const params = user.role === 'entity_user' && user.entity_id ? { entity_id: user.entity_id } : {};
+      // V-01: الاعتماد على httpOnly cookie — لا نتحقق من localStorage
+      const params = user?.role === 'entity_user' && user?.entity_id ? { entity_id: user.entity_id } : {};
       const res = await api.get('/template-assessments', { params });
       const list = res.data.assessments || [];
 
@@ -49,8 +37,6 @@ export default function Dashboard({ user }) {
       
       if (error.response?.status === 401 || error.response?.status === 403) {
         alert('انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى.');
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
         window.location.href = '/login';
       } else {
         alert('فشل تحميل البيانات. يرجى المحاولة مرة أخرى.');
@@ -58,7 +44,11 @@ export default function Dashboard({ user }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) loadDashboard();
+  }, [user, loadDashboard]);
 
   const getStatusBadge = (status) => {
     const badges = {

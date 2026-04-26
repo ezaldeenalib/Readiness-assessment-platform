@@ -33,7 +33,7 @@ router.get('/', authenticateToken, async (req, res) => {
         created_at,
         updated_at,
         (
-          SELECT COUNT(*) FROM Questions WHERE category_id = mc.id
+          SELECT COUNT(*) FROM questions WHERE category_id = mc.id
         ) as questions_count,
         (
           SELECT COUNT(*) FROM templates WHERE category_id = mc.id
@@ -101,7 +101,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
         created_at,
         updated_at,
         (
-          SELECT COUNT(*) FROM Questions WHERE category_id = mc.id
+          SELECT COUNT(*) FROM questions WHERE category_id = mc.id
         ) as questions_count,
         (
           SELECT COUNT(*) FROM templates WHERE category_id = mc.id
@@ -342,7 +342,7 @@ router.patch('/:id/toggle', authenticateToken, authorizeRoles('super_admin', 'mi
     // Check if category is in use before disabling
     if (!newActiveStatus) {
       const questionsCount = await client.query(
-        'SELECT COUNT(*) as count FROM Questions WHERE category_id = $1',
+        'SELECT COUNT(*) as count FROM questions WHERE category_id = $1',
         [id]
       );
       const templatesCount = await client.query(
@@ -446,7 +446,7 @@ router.delete('/:id', authenticateToken, authorizeRoles('super_admin'), async (r
 
     // Check if category is in use
     const questionsCount = await client.query(
-      'SELECT COUNT(*) as count FROM Questions WHERE category_id = $1',
+      'SELECT COUNT(*) as count FROM questions WHERE category_id = $1',
       [id]
     );
     const templatesCount = await client.query(
@@ -536,8 +536,8 @@ router.get('/:id/usage', authenticateToken, async (req, res) => {
     }
 
     const questionsResult = await pool.query(`
-      SELECT id, text_ar, text_en
-      FROM Questions
+      SELECT id, question_text_ar AS text_ar, question_text AS text_en
+      FROM questions
       WHERE category_id = $1
       LIMIT 10
     `, [id]);

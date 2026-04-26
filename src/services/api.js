@@ -40,24 +40,68 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// F-08: flag to prevent infinite refresh loops
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function subscribeTokenRefresh(cb) {
+  refreshSubscribers.push(cb);
+}
+function onRefreshed() {
+  refreshSubscribers.forEach((cb) => cb());
+  refreshSubscribers = [];
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const originalRequest = error.config;
+
     // On 403, refresh CSRF token and retry once (session identifier may have changed)
-    if (error.response?.status === 403 && !error.config._csrfRetried) {
+    if (error.response?.status === 403 && !originalRequest._csrfRetried) {
       csrfToken = null;
-      error.config._csrfRetried = true;
+      originalRequest._csrfRetried = true;
       const newToken = await getCsrfToken();
       if (newToken) {
-        error.config.headers['x-csrf-token'] = newToken;
-        return api(error.config);
+        originalRequest.headers['x-csrf-token'] = newToken;
+        return api(originalRequest);
       }
     }
-    if (error.response?.status === 401) {
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+
+    // F-08: On 401, attempt to refresh the access token via the refresh cookie
+    if (error.response?.status === 401 && !originalRequest._refreshRetried) {
+      originalRequest._refreshRetried = true;
+
+      if (isRefreshing) {
+        // Queue requests that arrive while a refresh is already in-flight
+        return new Promise((resolve) => {
+          subscribeTokenRefresh(() => resolve(api(originalRequest)));
+        });
+      }
+
+      isRefreshing = true;
+      try {
+        // H-01: fetch a fresh CSRF token then include it in the refresh call
+        // (plain axios needed here to avoid interceptor recursion, but we attach CSRF manually)
+        csrfToken = null; // force re-fetch
+        const freshCsrf = await getCsrfToken();
+        await axios.post(`${API_URL}/auth/refresh`, {}, {
+          withCredentials: true,
+          headers: freshCsrf ? { 'x-csrf-token': freshCsrf } : {},
+        });
+        csrfToken = null; // H-02: new session identifier after token rotation
+        isRefreshing = false;
+        onRefreshed();
+        return api(originalRequest);
+      } catch {
+        isRefreshing = false;
+        refreshSubscribers = [];
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
       }
     }
+
     return Promise.reject(error);
   }
 );

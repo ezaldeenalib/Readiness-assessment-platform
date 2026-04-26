@@ -1,9 +1,9 @@
-import express from 'express';
+ import express from 'express';
 import cors from 'cors';
-import helmet from 'helmet';            // V-14
-import rateLimit from 'express-rate-limit'; // V-10
-import cookieParser from 'cookie-parser';   // V-09
-import { doubleCsrf } from 'csrf-csrf';     // V-06
+import helmet from 'helmet';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
+import { doubleCsrf } from 'csrf-csrf';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 
@@ -27,14 +27,43 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ✅ FIX: always bind to all interfaces for production & VPS
+const LISTEN_HOST = '0.0.0.0';
+
 const isProd = process.env.NODE_ENV === 'production';
 
-// ── V-14: Helmet security headers ────────────────────────────────────────────
+// ── Trust proxy ──
+app.set('trust proxy', 1);
+
+// ── Security checks ──
+if (isProd) {
+  const WEAK_PATTERNS = ['change_in_production', 'dev-secret', 'development', 'changeme', 'example'];
+
+  const secretsToCheck = {
+    JWT_SECRET: process.env.JWT_SECRET,
+    REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET,
+    CSRF_SECRET: process.env.CSRF_SECRET,
+  };
+
+  for (const [name, value] of Object.entries(secretsToCheck)) {
+    if (!value || WEAK_PATTERNS.some(p => value.toLowerCase().includes(p)) || value.length < 32) {
+      throw new Error(`[FATAL] ${name} is missing or too weak for production.`);
+    }
+  }
+
+  if (process.env.JWT_SECRET === process.env.REFRESH_TOKEN_SECRET) {
+    throw new Error('[FATAL] JWT_SECRET and REFRESH_TOKEN_SECRET must be different.');
+  }
+}
+
+// ── Helmet ──
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
+      scriptSrcAttr: ["'none'"],
       styleSrc: ["'self'", "'unsafe-inline'", 'fonts.googleapis.com'],
       fontSrc: ["'self'", 'fonts.gstatic.com'],
       imgSrc: ["'self'", 'data:'],
@@ -42,42 +71,44 @@ app.use(helmet({
       frameSrc: ["'none'"],
     }
   },
-  hsts: isProd
-    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
-    : false,
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+  crossOriginEmbedderPolicy: { policy: 'require-corp' },
 }));
 
-// ── V-07: Fixed CORS — reject disallowed origins with an error ────────────────
+app.use((_req, res, next) => {
+  res.setHeader(
+    'Permissions-Policy',
+    'geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()'
+  );
+  next();
+});
+
+// ── CORS ──
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
-  : ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
+  : ['http://localhost:5173'];
 
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    if (!isProd && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) return cb(null, true);
-    // V-07: reject with error — NOT a truthy allowed value
     return cb(new Error('CORS: origin not permitted'), false);
   },
   credentials: true
 }));
 
-// ── V-09: cookie-parser for httpOnly JWT cookies ──────────────────────────────
+// ── Middlewares ──
 app.use(cookieParser());
-
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ── V-06: CSRF double-submit cookie protection (csrf-csrf v4) ─────────────────
+// ── CSRF ──
 const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
-  getSecret: () => process.env.CSRF_SECRET || 'csrf-dev-secret-change-in-prod',
-  // V4 required: tie the CSRF token to the current session/JWT
+  getSecret: () => process.env.CSRF_SECRET || 'csrf-dev-secret',
   getSessionIdentifier: (req) => req.cookies?.access_token || 'anonymous',
-  // Use a plain cookie name in dev (Host prefix requires HTTPS)
-  cookieName: isProd ? '__Host-psifi.x-csrf-token' : 'x-csrf-token',
+  cookieName: isProd ? '__Host-x-csrf-token' : 'x-csrf-token',
   cookieOptions: {
-    sameSite: 'strict',
+    sameSite: 'lax',
     path: '/',
     secure: isProd,
     httpOnly: true,
@@ -87,38 +118,48 @@ const { generateCsrfToken, doubleCsrfProtection } = doubleCsrf({
   getCsrfTokenFromRequest: (req) => req.headers['x-csrf-token'],
 });
 
-// Expose CSRF token to the frontend (GET — not state-changing)
 app.get('/api/csrf-token', (req, res) => {
   const token = generateCsrfToken(req, res);
   res.json({ token });
 });
 
-// Apply CSRF protection to all state-changing API routes
-app.use('/api', doubleCsrfProtection);
+// ── CSRF bypass routes ──
+const csrfExcludedPaths = new Set([
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/logout',
+]);
 
-// ── V-10: Rate limiting on auth endpoints ────────────────────────────────────
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,  // 15 minutes
-  max: 5,                     // 5 attempts per window per IP
-  message: { error: 'Too many attempts. Please try again in 15 minutes.' },
+app.use('/api', (req, res, next) => {
+  if (csrfExcludedPaths.has(req.path)) return next();
+  return doubleCsrfProtection(req, res, next);
+});
+
+// ── Rate limit ──
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Too many login attempts. Try later.' },
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-});
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-
-// V-07: Health check — no uptime, restricted to allowed IPs
-app.get('/health', (req, res) => {
-  const allowedIPs = (process.env.HEALTH_ALLOWED_IPS || '127.0.0.1,::1').split(',').map(s => s.trim());
-  const clientIP = req.ip || req.connection?.remoteAddress || '';
-  if (!allowedIPs.includes(clientIP)) {
-    return res.status(404).json({ error: 'Not found' });
-  }
-  res.json({ status: 'ok' });
+  keyGenerator: (req) => {
+    const email = (req.body?.email && String(req.body.email).toLowerCase().trim()) || 'unknown';
+    const ip = ipKeyGenerator(req);
+    return `login:${ip}:${email}`;
+  },
 });
 
-// API Routes
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+});
+
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/register', registerLimiter);
+
+// ── Routes ──
 app.use('/api/auth', authRoutes);
 app.use('/api/entities', entitiesRoutes);
 app.use('/api/users', usersRoutes);
@@ -135,24 +176,25 @@ app.use('/api/answers', answersRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/references', referencesRoutes);
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+// ── 404 ──
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not Found' });
 });
 
-// ── V-17: No stack traces in responses ───────────────────────────────────────
-app.use((err, req, res, next) => {
+// ── Error handler ──
+app.use((err, _req, res, _next) => {
+  if (err?.code === 'EBADCSRFTOKEN') {
+    return res.status(403).json({ error: 'Invalid CSRF token' });
+  }
+
   const errorId = crypto.randomUUID();
-  // Log internally with full details; respond with only a safe message
-  console.error(`[${errorId}]`, err);
-  res.status(err.status || 500).json({
-    error: isProd ? 'Internal server error' : (err.message || 'Internal server error'),
-    errorId,
-  });
+  console.error(`[ERROR ${errorId}]`, err);
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
+// ── START (FIXED FINAL) ──
+app.listen(PORT, LISTEN_HOST, () => {
+  console.log(`🚀 Server running on ${LISTEN_HOST}:${PORT}`);
 });
 
 export default app;

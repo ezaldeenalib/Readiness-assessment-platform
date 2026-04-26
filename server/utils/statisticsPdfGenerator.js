@@ -79,7 +79,6 @@ function generateStatisticsHTML(stats) {
 <head>
   <meta charset="UTF-8">
   <title>التقرير الإحصائي الشامل</title>
-  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <style>
     * {
       margin: 0;

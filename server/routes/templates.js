@@ -32,7 +32,7 @@ router.get('/', authenticateToken, async (req, res) => {
       FROM templates t
       LEFT JOIN master_categories mc ON t.category_id = mc.id
       LEFT JOIN template_questions tq ON t.id = tq.template_id
-      LEFT JOIN Questions q ON tq.question_id = q.id
+      LEFT JOIN questions q ON tq.question_id = q.id
       LEFT JOIN users u ON t.created_by = u.id
       WHERE 1=1
     `;
@@ -131,8 +131,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
         tq.section_name_ar,
         tq.include_in_evaluation,
         q.id,
-        q.text_en,
-        q.text_ar,
+        q.question_text AS text_en,
+        q.question_text_ar AS text_ar,
         q.question_type,
         q.parent_question_id,
         q.trigger_answer_value,
@@ -147,10 +147,10 @@ router.get('/:id', authenticateToken, async (req, res) => {
         q.updated_at,
         COALESCE(tq.override_weight, q.weight) as effective_weight,
         -- للحفاظ على التوافق مع النظام القديم
-        q.text_en as question_text,
-        q.text_ar as question_text_ar
+        q.question_text as question_text,
+        q.question_text_ar as question_text_ar
       FROM template_questions tq
-      JOIN Questions q ON tq.question_id = q.id
+      JOIN questions q ON tq.question_id = q.id
       LEFT JOIN master_categories sc ON tq.section_id = sc.id
       LEFT JOIN master_categories qc ON q.category_id = qc.id
       WHERE tq.template_id = $1
@@ -294,7 +294,7 @@ router.post('/', authenticateToken, authorizeRoles('super_admin', 'ministry_admi
         SUM(COALESCE(tq.override_weight, q.weight)) as total_weight
       FROM templates t
       LEFT JOIN template_questions tq ON t.id = tq.template_id
-      LEFT JOIN Questions q ON tq.question_id = q.id
+      LEFT JOIN questions q ON tq.question_id = q.id
       WHERE t.id = $1
       GROUP BY t.id
     `, [template.id]);
@@ -564,7 +564,7 @@ router.put('/:id', authenticateToken, authorizeRoles('super_admin', 'ministry_ad
         SUM(COALESCE(tq.override_weight, q.weight)) as total_weight
       FROM templates t
       LEFT JOIN template_questions tq ON t.id = tq.template_id
-      LEFT JOIN Questions q ON tq.question_id = q.id
+      LEFT JOIN questions q ON tq.question_id = q.id
       WHERE t.id = $1
       GROUP BY t.id
     `, [id]);

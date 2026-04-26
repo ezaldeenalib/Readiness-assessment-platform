@@ -127,16 +127,17 @@ router.get('/:id', authenticateToken, async (req, res) => {
     if (include_snapshot === 'true') {
       const snapshotResult = await query(`
         SELECT 
-          a.id,
-          a.question_id,
-          a.answer_value,
+          qa.id,
+          qa.question_id,
+          qa.answer_value,
           q.id as question_id,
-          q.text_en as question_text_en,
-          q.text_ar as question_text_ar,
+          q.question_text as question_text_en,
+          q.question_text_ar as question_text_ar,
           q.question_type
-        FROM Answers a
-        JOIN Questions q ON a.question_id = q.id
-        WHERE a.assessment_id = $1
+        FROM question_answers qa
+        JOIN template_assessments ta ON qa.template_assessment_id = ta.id
+        JOIN questions q ON qa.question_id = q.id
+        WHERE ta.assessment_id = $1
         ORDER BY q.category, q.created_at
       `, [id]);
 
@@ -380,7 +381,10 @@ router.post('/:id/snapshot', authenticateToken, async (req, res) => {
 
     // Get snapshot count
     const snapshotCount = await client.query(
-      `SELECT COUNT(*) as count FROM Answers WHERE assessment_id = $1`,
+      `SELECT COUNT(*)::int as count
+       FROM question_answers qa
+       JOIN template_assessments ta ON qa.template_assessment_id = ta.id
+       WHERE ta.assessment_id = $1`,
       [id]
     );
 
@@ -430,18 +434,19 @@ router.get('/:id/answers', authenticateToken, async (req, res) => {
     // Get snapshot answers
     const answersResult = await query(`
       SELECT 
-        a.id,
-        a.question_id,
-        a.answer_value,
-        a.created_at,
+        qa.id,
+        qa.question_id,
+        qa.answer_value,
+        qa.created_at,
         q.id as question_id,
-        q.text_en as question_text_en,
-        q.text_ar as question_text_ar,
+        q.question_text as question_text_en,
+        q.question_text_ar as question_text_ar,
         q.question_type,
         q.composite_columns
-      FROM Answers a
-      JOIN Questions q ON a.question_id = q.id
-      WHERE a.assessment_id = $1
+      FROM question_answers qa
+      JOIN template_assessments ta ON qa.template_assessment_id = ta.id
+      JOIN questions q ON qa.question_id = q.id
+      WHERE ta.assessment_id = $1
       ORDER BY q.category, q.created_at
     `, [id]);
 

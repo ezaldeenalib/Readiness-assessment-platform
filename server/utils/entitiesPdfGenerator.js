@@ -69,7 +69,6 @@ function generateHTMLContent(entities) {
 <head>
   <meta charset="UTF-8">
   <title>تقرير الجهات</title>
-  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <style>
     * {
       margin: 0;

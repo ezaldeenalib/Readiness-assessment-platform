@@ -1,11 +1,14 @@
 import jwt from 'jsonwebtoken';
 import { query } from '../database/db.js';
 import { getDefaultPermissionsForRole } from '../rbac/defaultRoles.js';
+import { parseId } from '../utils/sanitize.js';
+
+const isProd = process.env.NODE_ENV === 'production';
 
 /**
- * تحميل صلاحيات المستخدم من DB (دائماً — لا يُعتمد على JWT)
- * 1. أولاً من جدول user_roles → role_permissions (RBAC الجديد)
- * 2. Fallback: من DEFAULT_ROLE_PERMISSIONS حسب user.role
+ * Load user permissions from DB.
+ * H-03: In production, a DB error is a hard failure — do NOT silently fall back,
+ *       as that could grant unexpected default permissions.
  */
 export async function loadUserPermissions(userId, legacyRole) {
   try {
@@ -18,20 +21,33 @@ export async function loadUserPermissions(userId, legacyRole) {
     `, [userId]);
 
     if (result.rows.length > 0) {
-      const permissions = result.rows.map(r => r.permission);
-      const scope = result.rows[0].scope || 'own';
-      return { permissions, scope, source: 'db' };
+      return {
+        permissions: result.rows.map(r => r.permission),
+        scope: result.rows[0].scope || 'own',
+        source: 'db',
+      };
     }
-  } catch {
-    // RBAC tables not yet migrated — use fallback
-  }
+    // Empty rows = user has no explicit RBAC rows → use role defaults (legitimate path)
+    const defaults = getDefaultPermissionsForRole(legacyRole);
+    return { ...defaults, source: 'fallback' };
 
-  const defaults = getDefaultPermissionsForRole(legacyRole);
-  return { ...defaults, source: 'fallback' };
+  } catch (err) {
+    // H-03: Log the error prominently
+    console.error('[SECURITY] RBAC query failed for user', userId, ':', err.message);
+
+    // H-03: In production, DENY rather than silently fall back
+    if (isProd) {
+      throw new Error('Permission system unavailable — access denied');
+    }
+    // Dev-only fallback so migrations can still run without RBAC tables
+    console.warn('[SECURITY] Dev mode: falling back to default role permissions');
+    const defaults = getDefaultPermissionsForRole(legacyRole);
+    return { ...defaults, source: 'fallback-error' };
+  }
 }
 
 /**
- * تحميل المؤسسات المُسندة للمستخدم
+ * Load institution IDs assigned to a user.
  */
 export async function loadUserInstitutions(userId, entityId) {
   try {
@@ -48,16 +64,14 @@ export async function loadUserInstitutions(userId, entityId) {
 }
 
 /**
- * V-08: authenticateToken
- * - Accepts token from httpOnly cookie OR Authorization Bearer header
- * - ALWAYS re-queries permissions from DB (never trusts JWT payload for permissions/role)
+ * authenticateToken — verify JWT, load fresh user + permissions from DB.
+ * Accepts token from httpOnly cookie (preferred) or Authorization Bearer header.
  */
 export const authenticateToken = async (req, res, next) => {
   try {
-    // V-09: prefer httpOnly cookie; fall back to Authorization header
     const token =
       req.cookies?.access_token ||
-      (req.headers['authorization']?.split(' ')[1]);
+      req.headers['authorization']?.split(' ')[1];
 
     if (!token) {
       return res.status(401).json({ error: 'Access token required' });
@@ -65,7 +79,6 @@ export const authenticateToken = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Fetch user from DB — role from DB, not from JWT
     const result = await query(
       'SELECT id, email, full_name, role, entity_id, is_active FROM users WHERE id = $1',
       [decoded.userId]
@@ -76,12 +89,11 @@ export const authenticateToken = async (req, res, next) => {
     }
 
     const user = result.rows[0];
-
     if (!user.is_active) {
       return res.status(403).json({ error: 'User account is inactive' });
     }
 
-    // V-08: always re-query permissions from DB — never trust JWT embedded permissions
+    // H-03: loadUserPermissions now throws in prod on DB error
     const { permissions, scope } = await loadUserPermissions(user.id, user.role);
     user.permissions  = permissions;
     user.scope        = scope;
@@ -91,35 +103,49 @@ export const authenticateToken = async (req, res, next) => {
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {
-      return res.status(403).json({ error: 'Token expired' });
+      return res.status(401).json({ error: 'Token expired' });
     }
     if (error.name === 'JsonWebTokenError') {
-      return res.status(403).json({ error: 'Invalid token' });
+      return res.status(401).json({ error: 'Invalid token' });
     }
-    return res.status(403).json({ error: 'Invalid or expired token' });
+    // H-03: permission system failure → 503 in prod, 403 in dev
+    if (error.message?.includes('Permission system unavailable')) {
+      return res.status(503).json({ error: 'Service temporarily unavailable' });
+    }
+    return res.status(403).json({ error: 'Authentication failed' });
   }
 };
 
+/**
+ * authorizeRoles — check legacy role string.
+ * F-07: never expose which roles are required or what the current role is.
+ */
 export const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        error: 'Insufficient permissions',
-        required: roles,
-        current: req.user.role
-      });
+      return res.status(403).json({ error: 'Forbidden' });
     }
     next();
   };
 };
 
+/**
+ * checkEntityAccess — verify that the authenticated user can operate on entityId.
+ * L-05: guard against NaN if entityId is missing or non-numeric.
+ */
 export const checkEntityAccess = async (req, res, next) => {
   try {
     const { user } = req;
-    const entityId = parseInt(req.params.entityId || req.body.entity_id);
+
+    // L-05: use parseId to catch NaN early
+    const rawId = req.params.entityId ?? req.body.entity_id;
+    const entityId = parseId(rawId);
+    if (entityId === null) {
+      return res.status(400).json({ error: 'Invalid entity ID' });
+    }
 
     if (user.role === 'super_admin') return next();
 
@@ -132,7 +158,7 @@ export const checkEntityAccess = async (req, res, next) => {
           FROM entities e
           JOIN entity_tree et ON e.parent_entity_id = et.id
         )
-        SELECT * FROM entity_tree WHERE id = $2`,
+        SELECT id FROM entity_tree WHERE id = $2`,
         [user.entity_id, entityId]
       );
       if (result.rows.length > 0) return next();

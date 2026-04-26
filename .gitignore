@@ -1,8 +1,24 @@
+# node
 node_modules/
-dist/
+
+# env
 .env
-.DS_Store
+
+# models
+models/
+*.pt
+*.h5
+*.pkl
+*.onnx
+
+# logs
+logs/
 *.log
-coverage/
-.vscode/
-.idea/
+
+# build
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db

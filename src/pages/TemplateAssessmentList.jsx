@@ -1,16 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const TemplateAssessmentList = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [assessments, setAssessments] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [creating, setCreating] = useState(false);
-  const user = JSON.parse(localStorage.getItem('user'));
   
   const [filters, setFilters] = useState({
     entity_id: '',
@@ -19,7 +20,7 @@ const TemplateAssessmentList = () => {
   });
 
   const [createForm, setCreateForm] = useState({
-    entity_id: user.role === 'entity_user' && user.entity_id ? String(user.entity_id) : '',
+    entity_id: user?.role === 'entity_user' && user?.entity_id ? String(user.entity_id) : '',
     template_id: '',
     year: new Date().getFullYear(),
     quarter: Math.ceil((new Date().getMonth() + 1) / 3)
@@ -32,10 +33,10 @@ const TemplateAssessmentList = () => {
   }, [filters]);
 
   useEffect(() => {
-    if (user.role === 'entity_user' && entities.length === 1 && !createForm.entity_id) {
+    if (user?.role === 'entity_user' && entities.length === 1 && !createForm.entity_id) {
       setCreateForm(prev => ({ ...prev, entity_id: String(entities[0].id) }));
     }
-  }, [entities, user.role]);
+  }, [entities, user?.role]);
 
   const fetchAssessments = async () => {
     try {
@@ -72,7 +73,7 @@ const TemplateAssessmentList = () => {
     e.preventDefault();
     const payload = {
       ...createForm,
-      entity_id: createForm.entity_id ? parseInt(createForm.entity_id, 10) : (user.role === 'entity_user' && entities.length === 1 ? entities[0].id : createForm.entity_id),
+      entity_id: createForm.entity_id ? parseInt(createForm.entity_id, 10) : (user?.role === 'entity_user' && entities.length === 1 ? entities[0].id : createForm.entity_id),
     };
     try {
       setCreating(true);
@@ -140,7 +141,7 @@ const TemplateAssessmentList = () => {
           {/* Filters */}
           <div className="bg-white rounded-lg shadow p-4 mb-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {(user.role !== 'entity_user' || entities.length > 1) && (
+              {(user?.role !== 'entity_user' || entities.length > 1) && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">الجهة</label>
                   <select
@@ -283,7 +284,7 @@ const TemplateAssessmentList = () => {
                 </div>
 
                 <form onSubmit={handleCreateAssessment} className="space-y-6">
-                  {(user.role !== 'entity_user' || entities.length > 1) && (
+                  {(user?.role !== 'entity_user' || entities.length > 1) && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         الجهة *
@@ -303,10 +304,10 @@ const TemplateAssessmentList = () => {
                       </select>
                     </div>
                   )}
-                  {user.role === 'entity_user' && entities.length === 1 && (
+                  {user?.role === 'entity_user' && entities.length === 1 && (
                     <input type="hidden" name="entity_id" value={createForm.entity_id || entities[0]?.id} />
                   )}
-                  {user.role === 'entity_user' && entities.length === 1 && (
+                  {user?.role === 'entity_user' && entities.length === 1 && (
                     <p className="text-sm text-gray-600">الجهة: <strong>{entities[0]?.name_ar || entities[0]?.name}</strong></p>
                   )}
                   

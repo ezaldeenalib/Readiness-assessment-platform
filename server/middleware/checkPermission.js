@@ -27,11 +27,8 @@ export const checkPermission = (requiredPermission) => {
     const hasPermission = required.some(p => userPermissions.includes(p));
 
     if (!hasPermission) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        required: required,
-        message: 'ليس لديك صلاحية للوصول إلى هذا المورد',
-      });
+      // F-07: never expose which permissions are required or what role the user has
+      return res.status(403).json({ error: 'Forbidden' });
     }
 
     next();
@@ -55,11 +52,8 @@ export const checkAllPermissions = (requiredPermissions) => {
     const missing = requiredPermissions.filter(p => !userPermissions.includes(p));
 
     if (missing.length > 0) {
-      return res.status(403).json({
-        error: 'Forbidden',
-        missing,
-        message: 'ليس لديك الصلاحيات الكاملة للوصول إلى هذا المورد',
-      });
+      // F-07: never expose which permissions are missing
+      return res.status(403).json({ error: 'Forbidden' });
     }
 
     next();

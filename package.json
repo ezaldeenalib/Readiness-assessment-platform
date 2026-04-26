@@ -12,7 +12,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "db:migrate": "node server/database/run_migrate.js",
-    "db:update-tables": "node server/database/run_update_question_tables.js"
+    "db:migrate-fresh": "node server/database/migrate_fresh.js",
+    "db:migrate-unified": "node server/database/run_unified_migrate.js",
+    "db:update-tables": "node server/database/run_update_question_tables.js",
+    "db:seed-categories": "node server/database/seed_master_categories.js",
+    "db:ensure-legacy-answers": "node server/database/run_ensure_legacy_answers.js",
+    "db:security-hardening": "node server/database/run_security_hardening.js"
   },
   "dependencies": {
     "axios": "^1.6.2",
@@ -35,6 +40,7 @@
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0",
     "recharts": "^2.10.3",
+    "validator": "^13.15.26",
     "zod": "^4.3.6"
   },
   "devDependencies": {

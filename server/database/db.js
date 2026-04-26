@@ -1,7 +1,11 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// تحميل .env من جذر المشروع (أعلى بمستويين من server/database)
+dotenv.config({ path: path.resolve(__dirname, '../..', '.env') });
 
 // V-08: fail fast if any required env var is missing
 const requiredEnvVars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET'];

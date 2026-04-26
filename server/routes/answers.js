@@ -16,7 +16,7 @@ const router = express.Router();
 // ============================================
 async function logAudit(client, tableName, recordId, operationType, oldValue, newValue, performedBy) {
   await client.query(`
-    INSERT INTO AuditLog (table_name, record_id, operation_type, old_value, new_value, performed_by)
+    INSERT INTO auditlog (table_name, record_id, operation_type, old_value, new_value, performed_by)
     VALUES ($1, $2, $3, $4, $5, $6)
   `, [tableName, recordId, operationType, oldValue, newValue, performedBy]);
 }
@@ -50,11 +50,11 @@ router.get('/institution/:institutionId', authenticateToken, async (req, res) =>
         a.assessment_id,
         a.created_at,
         q.id as question_id,
-        q.text_en as question_text_en,
-        q.text_ar as question_text_ar,
+        q.question_text as question_text_en,
+        q.question_text_ar as question_text_ar,
         q.question_type
-      FROM Answers a
-      JOIN Questions q ON a.question_id = q.id
+      FROM answers a
+      JOIN questions q ON a.question_id = q.id
       WHERE a.institution_id = $1
     `;
 
@@ -108,11 +108,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
       SELECT 
         a.*,
         q.id as question_id,
-        q.text_en as question_text_en,
-        q.text_ar as question_text_ar,
+        q.question_text as question_text_en,
+        q.question_text_ar as question_text_ar,
         q.question_type
-      FROM Answers a
-      JOIN Questions q ON a.question_id = q.id
+      FROM answers a
+      JOIN questions q ON a.question_id = q.id
       WHERE a.id = $1
     `, [id]);
 
@@ -182,7 +182,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // التحقق من وجود السؤال
     const questionCheck = await client.query(
-      'SELECT id, question_type FROM Questions WHERE id = $1 AND is_active = TRUE',
+      'SELECT id, question_type FROM questions WHERE id = $1 AND is_active = TRUE',
       [question_id]
     );
 
@@ -199,7 +199,7 @@ router.post('/', authenticateToken, async (req, res) => {
     // البحث عن إجابة نشطة موجودة
     const existingAnswer = await client.query(`
       SELECT id, answer_value
-      FROM Answers
+      FROM answers
       WHERE question_id = $1
         AND institution_id = $2
         AND is_active = TRUE
@@ -217,7 +217,7 @@ router.post('/', authenticateToken, async (req, res) => {
       oldAnswerValue = existingAnswer.rows[0].answer_value;
 
       await client.query(`
-        UPDATE Answers
+        UPDATE answers
         SET is_active = FALSE,
             valid_to = NOW()
         WHERE id = $1
@@ -226,7 +226,7 @@ router.post('/', authenticateToken, async (req, res) => {
       // تسجيل تعطيل الإجابة القديمة
       await logAudit(
         client,
-        'Answers',
+        'answers',
         oldAnswerId,
         'UPDATE',
         JSON.stringify({ answer_value: oldAnswerValue, is_active: true }),
@@ -237,7 +237,7 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // إضافة الإجابة الجديدة
     const newAnswer = await client.query(`
-      INSERT INTO Answers (
+      INSERT INTO answers (
         institution_id,
         template_id,
         question_id,
@@ -246,7 +246,7 @@ router.post('/', authenticateToken, async (req, res) => {
         valid_from,
         created_at
       )
-      VALUES ($1, $2, $3, $4, TRUE, NOW(), NOW())
+      VALUES ($1, $2, $3, $4::jsonb, TRUE, NOW(), NOW())
       RETURNING *
     `, [
       institution_id,
@@ -260,7 +260,7 @@ router.post('/', authenticateToken, async (req, res) => {
     // تسجيل إضافة الإجابة الجديدة
     await logAudit(
       client,
-      'Answers',
+      'answers',
       newAnswerId,
       'INSERT',
       oldAnswerValue ? JSON.stringify({ answer_value: oldAnswerValue }) : null,
@@ -301,8 +301,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     // الحصول على الإجابة القديمة
     const oldAnswer = await client.query(`
       SELECT a.*, q.id as question_id
-      FROM Answers a
-      JOIN Questions q ON a.question_id = q.id
+      FROM answers a
+      JOIN questions q ON a.question_id = q.id
       WHERE a.id = $1
     `, [id]);
 
@@ -337,12 +337,12 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const performedBy = req.user.email || req.user.full_name || 'system';
 
     // حذف الإجابة
-    await client.query('DELETE FROM Answers WHERE id = $1', [id]);
+    await client.query('DELETE FROM answers WHERE id = $1', [id]);
 
     // تسجيل العملية في AuditLog
     await logAudit(
       client,
-      'Answers',
+      'answers',
       parseInt(id),
       'DELETE',
       JSON.stringify({
@@ -391,13 +391,13 @@ router.get('/audit/:institutionId', authenticateToken, async (req, res) => {
       SELECT 
         al.*,
         a.question_id,
-        q.code as question_code
-      FROM AuditLog al
-      LEFT JOIN Answers a ON al.table_name = 'Answers' AND al.record_id = a.id
-      LEFT JOIN Questions q ON a.question_id = q.id
-      WHERE al.table_name = 'Answers'
+        q.id::text as question_code
+      FROM auditlog al
+      LEFT JOIN answers a ON al.table_name IN ('answers', 'Answers') AND al.record_id = a.id
+      LEFT JOIN questions q ON a.question_id = q.id
+      WHERE al.table_name IN ('answers', 'Answers')
         AND EXISTS (
-          SELECT 1 FROM Answers a2 
+          SELECT 1 FROM answers a2 
           WHERE a2.id = al.record_id 
           AND a2.institution_id = $1
         )

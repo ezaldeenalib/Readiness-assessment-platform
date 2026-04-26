@@ -403,10 +403,10 @@ router.post('/create', authenticateToken, async (req, res) => {
         json_agg(
           json_build_object(
             'id', q.id,
-            'text_en', q.text_en,
-            'text_ar', q.text_ar,
-            'question_text', q.text_en,
-            'question_text_ar', q.text_ar,
+            'text_en', q.question_text,
+            'text_ar', q.question_text_ar,
+            'question_text', q.question_text,
+            'question_text_ar', q.question_text_ar,
             'question_type', q.question_type,
             'parent_question_id', q.parent_question_id,
             'trigger_answer_value', q.trigger_answer_value,
@@ -420,7 +420,7 @@ router.post('/create', authenticateToken, async (req, res) => {
         ) as questions
       FROM templates t
       JOIN template_questions tq ON t.id = tq.template_id
-      JOIN Questions q ON tq.question_id = q.id
+      JOIN questions q ON tq.question_id = q.id
       WHERE t.id = $1 AND t.is_active = true AND q.is_active = true
       GROUP BY t.id
     `, [template_id]);
@@ -461,7 +461,7 @@ router.post('/create', authenticateToken, async (req, res) => {
     const questionsWithEvaluationFlag = await client.query(`
       SELECT q.id, tq.include_in_evaluation, COALESCE(tq.override_weight, q.weight) as effective_weight
       FROM template_questions tq
-      JOIN Questions q ON tq.question_id = q.id
+      JOIN questions q ON tq.question_id = q.id
       WHERE tq.template_id = $1 AND q.is_active = true
     `, [template_id]);
     
@@ -649,8 +649,8 @@ router.get('/:assessmentId', authenticateToken, async (req, res) => {
     const questionsResult = await pool.query(`
       SELECT 
         q.id,
-        q.text_en,
-        q.text_ar,
+        q.question_text AS text_en,
+        q.question_text_ar AS text_ar,
         q.question_type,
         q.parent_question_id,
         q.trigger_answer_value,
@@ -671,10 +671,10 @@ router.get('/:assessmentId', authenticateToken, async (req, res) => {
         tq.section_name,
         tq.section_name_ar,
         -- للحفاظ على التوافق مع النظام القديم
-        q.text_en as question_text,
-        q.text_ar as question_text_ar
+        q.question_text as question_text,
+        q.question_text_ar as question_text_ar
       FROM question_answers qa
-      JOIN Questions q ON qa.question_id = q.id
+      JOIN questions q ON qa.question_id = q.id
       JOIN template_questions tq ON q.id = tq.question_id AND tq.template_id = $2
       WHERE qa.template_assessment_id = $1
       ORDER BY tq.display_order
@@ -872,7 +872,7 @@ router.post('/:assessmentId/answers', authenticateToken, async (req, res) => {
       const questionResult = await client.query(`
         SELECT q.*, tq.override_weight,
           COALESCE(tq.override_weight, q.weight) as effective_weight
-        FROM Questions q
+        FROM questions q
         JOIN template_questions tq ON q.id = tq.question_id
         WHERE q.id = $1 AND tq.template_id = $2 AND q.is_active = true
       `, [ans.question_id, assessment.template_id]);
@@ -1137,7 +1137,7 @@ router.put('/:assessmentId/evaluations', authenticateToken, async (req, res) => 
       SELECT qa.*, q.weight, tq.override_weight,
         COALESCE(tq.override_weight, q.weight) as max_possible_score
       FROM question_answers qa
-      JOIN Questions q ON qa.question_id = q.id
+      JOIN questions q ON qa.question_id = q.id
       LEFT JOIN template_questions tq ON q.id = tq.question_id AND tq.template_id = $1
       WHERE qa.template_assessment_id = $2
     `, [assessment.template_id, assessment.template_assessment_id]);
@@ -1343,13 +1343,13 @@ router.get('/:assessmentId/questions/:questionId/evaluation', authenticateToken,
         qa.evaluation_notes,
         qa.answered_by,
         qa.answered_at,
-        q.text_en,
-        q.text_ar,
+        q.question_text AS text_en,
+        q.question_text_ar AS text_ar,
         q.question_type,
         q.weight,
         u.full_name as answered_by_name
       FROM question_answers qa
-      JOIN Questions q ON qa.question_id = q.id
+      JOIN questions q ON qa.question_id = q.id
       LEFT JOIN users u ON qa.answered_by = u.id
       WHERE qa.template_assessment_id = $1 AND qa.question_id = $2
     `, [assessment.template_assessment_id, questionId]);
@@ -1443,7 +1443,7 @@ router.put('/:assessmentId/questions/:questionId/evaluation', authenticateToken,
       SELECT qa.*, q.weight, tq.override_weight,
         COALESCE(tq.override_weight, q.weight) as max_possible_score
       FROM question_answers qa
-      JOIN Questions q ON qa.question_id = q.id
+      JOIN questions q ON qa.question_id = q.id
       LEFT JOIN template_questions tq ON q.id = tq.question_id AND tq.template_id = $2
       WHERE qa.template_assessment_id = $1 AND qa.question_id = $3
     `, [assessment.template_assessment_id, assessment.template_id, questionId]);

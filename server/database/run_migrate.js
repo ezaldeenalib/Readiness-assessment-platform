@@ -23,16 +23,20 @@ async function runMigration() {
     await client.query(safeSql);
     console.log('✅ تم.\n');
 
-    // 2) إضافة نوع السؤال MultiSelect إن وُجد القيد
+    // 2) إضافة أنواع الأسئلة (MultiSelect, StaticData, Composite) إن وُجد الملف
     try {
-      const multiPath = path.join(__dirname, 'add_multiselect_type.sql');
-      const multiSql = fs.readFileSync(multiPath, 'utf8');
-      console.log('📋 تشغيل add_multiselect_type.sql...');
-      await client.query(multiSql);
-      console.log('✅ تم.\n');
+      const multiPath = path.join(__dirname, 'add_question_type_values.sql');
+      if (fs.existsSync(multiPath)) {
+        const multiSql = fs.readFileSync(multiPath, 'utf8');
+        console.log('📋 تشغيل add_question_type_values.sql...');
+        await client.query(multiSql);
+        console.log('✅ تم.\n');
+      } else {
+        console.log('⏭️ add_question_type_values.sql غير موجود، تخطي.\n');
+      }
     } catch (e) {
       if (e.message && e.message.includes('already exists')) {
-        console.log('⏭️ قيد MultiSelect موجود مسبقاً، تخطي.\n');
+        console.log('⏭️ قيم question_type موجودة مسبقاً، تخطي.\n');
       } else {
         throw e;
       }
