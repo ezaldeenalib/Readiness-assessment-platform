@@ -4,8 +4,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// تحميل .env من جذر المشروع (أعلى بمستويين من server/database)
-dotenv.config({ path: path.resolve(__dirname, '../..', '.env') });
+// Load env from `server/.env` first, then fallback to project root `.env`.
+const serverEnvPath = path.resolve(__dirname, '..', '.env');
+const rootEnvPath = path.resolve(__dirname, '../..', '.env');
+const loadedFromServerEnv = dotenv.config({ path: serverEnvPath });
+if (loadedFromServerEnv.error) {
+  dotenv.config({ path: rootEnvPath });
+}
 
 // V-08: fail fast if any required env var is missing
 const requiredEnvVars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'JWT_SECRET'];
